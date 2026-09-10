@@ -17,6 +17,8 @@ from msgpack import (
     encoded_map_header_len,
     encoded_str_len,
 )
+from DocumentMeta import DocumentMeta
+from DocumentItem import DocumentItem
 
 struct Document(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
     var id: String
@@ -45,22 +47,90 @@ struct Document(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1 + 1 + 1 + 1)
-        w.write_str("id")
-        w.write_str(self.id)
-        w.write_str("status")
-        w.write_int(self.status)
-        w.write_str("meta")
+        w.ensure(self.encoded_len(options) + 16)
+        var p = w.pos
+        var _mc = 0 + 1 + 1 + 1 + 1
+        if _mc <= 15:
+            w.buf[p] = Byte(128 + _mc)
+            p += 1
+        else:
+            w.pos = p
+            w.write_map_header(_mc)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(6580642)
+        p += 3
+        var _sb_id = self.id.as_bytes()
+        var _sn_id = len(_sb_id)
+        if _sn_id <= 31:
+            w.buf[p] = Byte(160 + _sn_id)
+            p += 1
+            if _sn_id > 0:
+                w.pos = p
+                w.write_bytes(_sb_id)
+                p = w.pos
+        else:
+            w.pos = p
+            w.write_str(self.id)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(32498765033403302)
+        p += 7
+        var _iv_status = self.status
+        if _iv_status >= Int64(-32) and _iv_status <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_status) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_status)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(418564631972)
+        p += 5
+        w.pos = p
         self.meta.encode_to(w, options)
-        w.write_str("items")
+        p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(126913690757541)
+        p += 6
+        w.pos = p
         w.write_array_header(len(self.items))
         var i = 0
         while i < len(self.items):
             self.items[i].encode_to(w, options)
             i += 1
+        p = w.pos
+        w.pos = p
+
+    def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
+        if not r.try_eat_fixstr("id".as_bytes()):
+            return False
+        self.id = r.read_str()
+        if not r.try_eat_fixstr("status".as_bytes()):
+            return False
+        self.status = r.read_i64()
+        if not r.try_eat_fixstr("meta".as_bytes()):
+            return False
+        self.meta = DocumentMeta()
+        self.meta.decode_from(r)
+        if not r.try_eat_fixstr("items".as_bytes()):
+            return False
+        var _ln = r.read_array_header()
+        self.items = List[DocumentItem](capacity=_ln)
+        var _j = 0
+        while _j < _ln:
+            var _it = DocumentItem()
+            _it.decode_from(r)
+            self.items.append(_it^)
+            _j += 1
+        return True
 
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_map_header()
+        var saved = r.pos
+        if n == 4 and self._decode_expected(r):
+            return
+        r.pos = saved
+        var seen_id = False
+        var seen_status = False
+        var seen_meta = False
+        var seen_items = False
         var i = 0
         while i < n:
             if not r.peek_is_str():
@@ -70,14 +140,33 @@ struct Document(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
                 continue
             var key = r.read_str()
             if key == "id":
+                seen_id = True
                 self.id = r.read_str()
             elif key == "status":
+                seen_status = True
                 self.status = r.read_i64()
             elif key == "meta":
+                seen_meta = True
                 self.meta = DocumentMeta()
-                    self.meta.decode_from(r)
+                self.meta.decode_from(r)
             elif key == "items":
-                self.items = DocumentItem()
+                seen_items = True
+                var _ln = r.read_array_header()
+                self.items = List[DocumentItem](capacity=_ln)
+                var _j = 0
+                while _j < _ln:
+                    var _it = DocumentItem()
+                    _it.decode_from(r)
+                    self.items.append(_it^)
+                    _j += 1
             else:
                 r.skip_value()
             i += 1
+        if not seen_id:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_status:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_meta:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_items:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())

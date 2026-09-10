@@ -38,15 +38,59 @@ struct LongList(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1 + (1 if self.next else 0))
-        w.write_str("value")
-        w.write_int(self.value)
+        w.ensure(self.encoded_len(options) + 16)
+        var p = w.pos
+        var _mc = 0 + 1 + (1 if self.next else 0)
+        if _mc <= 15:
+            w.buf[p] = Byte(128 + _mc)
+            p += 1
+        else:
+            w.pos = p
+            w.write_map_header(_mc)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(111555003905701)
+        p += 6
+        var _iv_value = self.value
+        if _iv_value >= Int64(-32) and _iv_value <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_value) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_value)
+            p = w.pos
         if self.next:
-            w.write_str("next")
-            w.write_int(self.next.value())
+            w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(500236119716)
+            p += 5
+            var _iv_next = self.next.value()
+            if _iv_next >= Int64(-32) and _iv_next <= Int64(127):
+                w.buf[p] = Byte(Int(_iv_next) & 255)
+                p += 1
+            else:
+                w.pos = p
+                w.write_int(_iv_next)
+                p = w.pos
+        w.pos = p
+
+    def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
+        if not r.try_eat_fixstr("value".as_bytes()):
+            return False
+        self.value = r.read_i64()
+        if not r.try_eat_fixstr("next".as_bytes()):
+            return False
+        if r.peek_is_nil():
+            r.read_nil()
+            self.next = None
+        else:
+            self.next = r.read_i64()
+        return True
 
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_map_header()
+        var saved = r.pos
+        if n == 2 and self._decode_expected(r):
+            return
+        r.pos = saved
+        var seen_value = False
         var i = 0
         while i < n:
             if not r.peek_is_str():
@@ -56,6 +100,7 @@ struct LongList(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
                 continue
             var key = r.read_str()
             if key == "value":
+                seen_value = True
                 self.value = r.read_i64()
             elif key == "next":
                 if r.peek_is_nil():
@@ -66,3 +111,5 @@ struct LongList(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
             else:
                 r.skip_value()
             i += 1
+        if not seen_value:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())

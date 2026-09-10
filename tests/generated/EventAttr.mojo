@@ -37,14 +37,65 @@ struct EventAttr(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1 + 1)
-        w.write_str("key")
-        w.write_str(self.key)
-        w.write_str("value")
-        w.write_str(self.value)
+        w.ensure(self.encoded_len(options) + 16)
+        var p = w.pos
+        var _mc = 0 + 1 + 1
+        if _mc <= 15:
+            w.buf[p] = Byte(128 + _mc)
+            p += 1
+        else:
+            w.pos = p
+            w.write_map_header(_mc)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(2036689827)
+        p += 4
+        var _sb_key = self.key.as_bytes()
+        var _sn_key = len(_sb_key)
+        if _sn_key <= 31:
+            w.buf[p] = Byte(160 + _sn_key)
+            p += 1
+            if _sn_key > 0:
+                w.pos = p
+                w.write_bytes(_sb_key)
+                p = w.pos
+        else:
+            w.pos = p
+            w.write_str(self.key)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(111555003905701)
+        p += 6
+        var _sb_value = self.value.as_bytes()
+        var _sn_value = len(_sb_value)
+        if _sn_value <= 31:
+            w.buf[p] = Byte(160 + _sn_value)
+            p += 1
+            if _sn_value > 0:
+                w.pos = p
+                w.write_bytes(_sb_value)
+                p = w.pos
+        else:
+            w.pos = p
+            w.write_str(self.value)
+            p = w.pos
+        w.pos = p
+
+    def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
+        if not r.try_eat_fixstr("key".as_bytes()):
+            return False
+        self.key = r.read_str()
+        if not r.try_eat_fixstr("value".as_bytes()):
+            return False
+        self.value = r.read_str()
+        return True
 
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_map_header()
+        var saved = r.pos
+        if n == 2 and self._decode_expected(r):
+            return
+        r.pos = saved
+        var seen_key = False
+        var seen_value = False
         var i = 0
         while i < n:
             if not r.peek_is_str():
@@ -54,9 +105,15 @@ struct EventAttr(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
                 continue
             var key = r.read_str()
             if key == "key":
+                seen_key = True
                 self.key = r.read_str()
             elif key == "value":
+                seen_value = True
                 self.value = r.read_str()
             else:
                 r.skip_value()
             i += 1
+        if not seen_key:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_value:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())

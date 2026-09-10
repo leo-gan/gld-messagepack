@@ -35,9 +35,24 @@ struct Compact(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_array_header(2)
-        w.write_bool(self.a)
-        w.write_int(self.b)
+        w.ensure(self.encoded_len(options) + 16)
+        var p = w.pos
+        w.buf[p] = Byte(146)
+        p += 1
+        if self.a:
+            w.buf[p] = Byte(195)
+        else:
+            w.buf[p] = Byte(194)
+        p += 1
+        var _iv_b = self.b
+        if _iv_b >= Int64(-32) and _iv_b <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_b) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_b)
+            p = w.pos
+        w.pos = p
 
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_array_header()

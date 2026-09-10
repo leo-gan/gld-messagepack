@@ -16,6 +16,8 @@ def _mkdir_p(path: String) raises:
     var args = List[String]()
     args.append("-p")
     args.append(path)
+    if path.byte_length() == 0:
+        return
     var proc = Process.run("mkdir", args)
     _ = proc.wait()
 
@@ -31,6 +33,8 @@ def main() raises:
     var out_dir = String()
     var schema_path = String()
     var i = 1
+    if len(args) > 1 and args[1] == "--":
+        i = 2
     while i < len(args):
         if args[i] == "--out" and i + 1 < len(args):
             i += 1
@@ -41,6 +45,9 @@ def main() raises:
         elif args[i] == "--help" or args[i] == "-h":
             print(_usage())
             return
+        elif args[i] == "--":
+            i += 1
+            continue
         i += 1
     if out_dir.byte_length() == 0 or schema_path.byte_length() == 0:
         print(_usage())

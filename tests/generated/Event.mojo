@@ -17,6 +17,7 @@ from msgpack import (
     encoded_map_header_len,
     encoded_str_len,
 )
+from EventAttr import EventAttr
 
 struct Event(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
     var ts: Int64
@@ -37,18 +38,61 @@ struct Event(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1 + 1)
-        w.write_str("ts")
-        w.write_int(self.ts)
-        w.write_str("attrs")
+        w.ensure(self.encoded_len(options) + 16)
+        var p = w.pos
+        var _mc = 0 + 1 + 1
+        if _mc <= 15:
+            w.buf[p] = Byte(128 + _mc)
+            p += 1
+        else:
+            w.pos = p
+            w.write_map_header(_mc)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(7566498)
+        p += 3
+        var _iv_ts = self.ts
+        if _iv_ts >= Int64(-32) and _iv_ts <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_ts) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_ts)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(126935417250213)
+        p += 6
+        w.pos = p
         w.write_array_header(len(self.attrs))
         var i = 0
         while i < len(self.attrs):
             self.attrs[i].encode_to(w, options)
             i += 1
+        p = w.pos
+        w.pos = p
+
+    def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
+        if not r.try_eat_fixstr("ts".as_bytes()):
+            return False
+        self.ts = r.read_i64()
+        if not r.try_eat_fixstr("attrs".as_bytes()):
+            return False
+        var _ln = r.read_array_header()
+        self.attrs = List[EventAttr](capacity=_ln)
+        var _j = 0
+        while _j < _ln:
+            var _it = EventAttr()
+            _it.decode_from(r)
+            self.attrs.append(_it^)
+            _j += 1
+        return True
 
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_map_header()
+        var saved = r.pos
+        if n == 2 and self._decode_expected(r):
+            return
+        r.pos = saved
+        var seen_ts = False
+        var seen_attrs = False
         var i = 0
         while i < n:
             if not r.peek_is_str():
@@ -58,9 +102,22 @@ struct Event(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
                 continue
             var key = r.read_str()
             if key == "ts":
+                seen_ts = True
                 self.ts = r.read_i64()
             elif key == "attrs":
-                self.attrs = EventAttr()
+                seen_attrs = True
+                var _ln = r.read_array_header()
+                self.attrs = List[EventAttr](capacity=_ln)
+                var _j = 0
+                while _j < _ln:
+                    var _it = EventAttr()
+                    _it.decode_from(r)
+                    self.attrs.append(_it^)
+                    _j += 1
             else:
                 r.skip_value()
             i += 1
+        if not seen_ts:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_attrs:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())

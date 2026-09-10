@@ -54,6 +54,38 @@ struct WireReader[origin: ImmOrigin](Movable):
             raise DecodeError(DecodeError.KIND_RANGE, self.pos)
         if n > self.remaining():
             raise DecodeError(DecodeError.KIND_EOF, self.pos)
+        if n == 8:
+            var b0 = UInt64(Int(self.data[self.pos]))
+            var b1 = UInt64(Int(self.data[self.pos + 1]))
+            var b2 = UInt64(Int(self.data[self.pos + 2]))
+            var b3 = UInt64(Int(self.data[self.pos + 3]))
+            var b4 = UInt64(Int(self.data[self.pos + 4]))
+            var b5 = UInt64(Int(self.data[self.pos + 5]))
+            var b6 = UInt64(Int(self.data[self.pos + 6]))
+            var b7 = UInt64(Int(self.data[self.pos + 7]))
+            self.pos += 8
+            return (
+                (b0 << UInt64(56))
+                | (b1 << UInt64(48))
+                | (b2 << UInt64(40))
+                | (b3 << UInt64(32))
+                | (b4 << UInt64(24))
+                | (b5 << UInt64(16))
+                | (b6 << UInt64(8))
+                | b7
+            )
+        if n == 4:
+            var c0 = UInt64(Int(self.data[self.pos]))
+            var c1 = UInt64(Int(self.data[self.pos + 1]))
+            var c2 = UInt64(Int(self.data[self.pos + 2]))
+            var c3 = UInt64(Int(self.data[self.pos + 3]))
+            self.pos += 4
+            return (c0 << UInt64(24)) | (c1 << UInt64(16)) | (c2 << UInt64(8)) | c3
+        if n == 2:
+            var d0 = UInt64(Int(self.data[self.pos]))
+            var d1 = UInt64(Int(self.data[self.pos + 1]))
+            self.pos += 2
+            return (d0 << UInt64(8)) | d1
         var out = UInt64(0)
         var i = 0
         while i < n:
@@ -86,6 +118,43 @@ struct WireReader[origin: ImmOrigin](Movable):
             raise DecodeError(DecodeError.KIND_RANGE, self.pos)
         if n > self.remaining():
             raise DecodeError(DecodeError.KIND_EOF, self.pos)
+
+    def try_eat_bytes[origin2: ImmOrigin](mut self, lit: Span[Byte, origin2]) -> Bool:
+        var n = len(lit)
+        if self.pos + n > len(self.data):
+            return False
+        var i = 0
+        while i < n:
+            if Int(self.data[self.pos + i]) != Int(lit[i]):
+                return False
+            i += 1
+        self.pos += n
+        return True
+
+    def try_eat_fixstr[origin2: ImmOrigin](mut self, name: Span[Byte, origin2]) -> Bool:
+        """Match a shortest-form string key without allocating."""
+        var n = len(name)
+        if n > 31:
+            return False
+        if self.pos + 1 + n > len(self.data):
+            return False
+        if Int(self.data[self.pos]) != (0xA0 | n):
+            return False
+        var i = 0
+        while i < n:
+            if Int(self.data[self.pos + 1 + i]) != Int(name[i]):
+                return False
+            i += 1
+        self.pos += 1 + n
+        return True
+
+    def load_u64(self) -> UInt64:
+        var p = self.data.unsafe_ptr().unsafe_offset(self.pos)
+        return p.bitcast[UInt64]()[]
+
+    def load_u32_at(self, off: Int) -> UInt32:
+        var p = self.data.unsafe_ptr().unsafe_offset(self.pos + off)
+        return p.bitcast[UInt32]()[]
 
     def peek_is_str(self) raises DecodeError -> Bool:
         var b = self.peek_byte()
