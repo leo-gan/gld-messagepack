@@ -1,0 +1,1 @@
+{"title":"Stamp","type":"object","properties":{"when":{"x-msgpack-timestamp":true}},"required":["when"]}

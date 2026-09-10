@@ -1,0 +1,1 @@
+{"title":"CompactKeys","type":"object","x-msgpack-encoding":"intkeys","properties":{"a":{"type":"boolean","x-msgpack-key":0},"b":{"type":"integer","x-msgpack-key":1}},"required":["a","b"]}

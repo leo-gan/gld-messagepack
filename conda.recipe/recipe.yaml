@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+context:
+  version: "0.1.0"
+
+package:
+  name: mojo-messagepack
+  version: ${{ version }}
+
+source:
+  path: ..
+
+build:
+  number: 0
+  script:
+    - mkdir -p ${{ PREFIX }}/lib/mojo ${{ PREFIX }}/bin
+    - mojo precompile -I src src/wire -o ${{ PREFIX }}/lib/mojo/wire.mojoc
+    - mojo precompile -I src src/runtime -o ${{ PREFIX }}/lib/mojo/runtime.mojoc
+    - mojo precompile -I src src/schema -o ${{ PREFIX }}/lib/mojo/schema.mojoc
+    - mojo precompile -I src src/msgpack -o ${{ PREFIX }}/lib/mojo/msgpack.mojoc
+    - mojo build -I src src/codegen/cli.mojo -o ${{ PREFIX }}/bin/gld-msgpackgen-mojo
+
+requirements:
+  build:
+    - mojo-compiler ==1.0.0
+  host:
+    - mojo-compiler ==1.0.0
+  run:
+    - ${{ pin_compatible('mojo-compiler') }}
+
+tests:
+  - script:
+      - if: unix
+        then:
+          - mojo run test_import.mojo
+          - gld-msgpackgen-mojo --help
+    files:
+      recipe:
+        - test_import.mojo
+
+about:
+  homepage: https://leo-gan.github.io/gld-messagepack/
+  repository: https://github.com/leo-gan/gld-messagepack
+  documentation: https://leo-gan.github.io/gld-messagepack/
+  license: MIT
+  license_file: LICENSE
+  summary: From-scratch MessagePack library for Mojo
+  description: |
+    Runtime and code generator written in Mojo. Does not wrap msgpack-c
+    or any other C, C++, or Rust MessagePack library. The package installs
+    msgpack.mojoc (plus wire/runtime/schema) and the
+    gld-msgpackgen-mojo CLI.

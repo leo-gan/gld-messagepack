@@ -1,0 +1,1 @@
+{"title":"Compact","type":"object","x-msgpack-encoding":"array","properties":{"a":{"type":"boolean"},"b":{"type":"integer"}},"required":["a","b"]}

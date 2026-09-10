@@ -1,0 +1,1 @@
+{"title":"LongList","type":"object","properties":{"value":{"type":"integer"},"next":{"$ref":"#"}},"required":["value"]}

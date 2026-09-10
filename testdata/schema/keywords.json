@@ -1,0 +1,1 @@
+{"title":"Keywords","type":"object","properties":{"struct":{"type":"integer"},"fn":{"type":"integer"},"var":{"type":"string"},"match":{"type":"boolean"}},"required":["struct","fn","var","match"]}

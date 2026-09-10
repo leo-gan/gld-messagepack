@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Message",
+  "$defs": {
+    "DocumentMeta": {
+      "type": "object",
+      "properties": {
+        "region": { "type": "string" },
+        "version": { "type": "integer" }
+      },
+      "required": ["region", "version"]
+    },
+    "DocumentItem": {
+      "type": "object",
+      "properties": {
+        "sku": { "type": "string" },
+        "qty": { "type": "integer" },
+        "price_minor": { "type": "integer" }
+      },
+      "required": ["sku", "qty", "price_minor"]
+    },
+    "Document": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "status": { "type": "integer" },
+        "meta": { "$ref": "#/$defs/DocumentMeta" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/DocumentItem" }
+        }
+      },
+      "required": ["id", "status", "meta", "items"]
+    },
+    "Telemetry": {
+      "type": "object",
+      "properties": {
+        "values": {
+          "type": "array",
+          "items": { "type": "number" }
+        }
+      },
+      "required": ["values"]
+    },
+    "Strings": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["items"]
+    },
+    "EventAttr": {
+      "type": "object",
+      "properties": {
+        "key": { "type": "string" },
+        "value": { "type": "string" }
+      },
+      "required": ["key", "value"]
+    },
+    "Event": {
+      "type": "object",
+      "properties": {
+        "ts": { "type": "integer" },
+        "attrs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EventAttr" }
+        }
+      },
+      "required": ["ts", "attrs"]
+    }
+  },
+  "type": "object",
+  "properties": {
+    "f_bool": { "type": "boolean" },
+    "f_int32": { "type": "integer" },
+    "f_int64": { "type": "integer" },
+    "f_float64": { "type": "number" },
+    "f_string": { "type": "string" },
+    "f_bool_2": { "type": "boolean" },
+    "f_int32_2": { "type": "integer" },
+    "f_string_2": { "type": "string" }
+  },
+  "required": [
+    "f_bool",
+    "f_int32",
+    "f_int64",
+    "f_float64",
+    "f_string",
+    "f_bool_2",
+    "f_int32_2",
+    "f_string_2"
+  ]
+}

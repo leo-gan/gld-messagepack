@@ -1,0 +1,1 @@
+{"title":"Blob","type":"object","properties":{"data":{"type":"bytes"}},"required":["data"]}
