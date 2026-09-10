@@ -23,7 +23,9 @@ trait MsgpackDatum(Copyable, Movable, Defaultable, Deinitable):
 def encode[
     T: MsgpackDatum
 ](value: T, options: EncodeOptions = EncodeOptions.default) -> List[Byte]:
-    var cap = 256
+    var cap = value.encoded_len(options)
+    if cap < 16:
+        cap = 16
     var w = WireWriter(capacity=cap, exact=True)
     value.encode_to(w, options)
     return w^.finish()

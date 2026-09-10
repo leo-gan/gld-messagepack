@@ -116,6 +116,32 @@ struct WireWriter(Movable):
         self.pos += 1
 
     def write_be(mut self, argument: UInt64, n: Int):
+        if n == 8:
+            self.ensure(8)
+            self.buf[self.pos] = Byte((argument >> UInt64(56)) & UInt64(0xFF))
+            self.buf[self.pos + 1] = Byte((argument >> UInt64(48)) & UInt64(0xFF))
+            self.buf[self.pos + 2] = Byte((argument >> UInt64(40)) & UInt64(0xFF))
+            self.buf[self.pos + 3] = Byte((argument >> UInt64(32)) & UInt64(0xFF))
+            self.buf[self.pos + 4] = Byte((argument >> UInt64(24)) & UInt64(0xFF))
+            self.buf[self.pos + 5] = Byte((argument >> UInt64(16)) & UInt64(0xFF))
+            self.buf[self.pos + 6] = Byte((argument >> UInt64(8)) & UInt64(0xFF))
+            self.buf[self.pos + 7] = Byte(argument & UInt64(0xFF))
+            self.pos += 8
+            return
+        if n == 4:
+            self.ensure(4)
+            self.buf[self.pos] = Byte((argument >> UInt64(24)) & UInt64(0xFF))
+            self.buf[self.pos + 1] = Byte((argument >> UInt64(16)) & UInt64(0xFF))
+            self.buf[self.pos + 2] = Byte((argument >> UInt64(8)) & UInt64(0xFF))
+            self.buf[self.pos + 3] = Byte(argument & UInt64(0xFF))
+            self.pos += 4
+            return
+        if n == 2:
+            self.ensure(2)
+            self.buf[self.pos] = Byte((argument >> UInt64(8)) & UInt64(0xFF))
+            self.buf[self.pos + 1] = Byte(argument & UInt64(0xFF))
+            self.pos += 2
+            return
         self.ensure(n)
         var i = n
         while i > 0:
@@ -202,7 +228,19 @@ struct WireWriter(Movable):
         self.write_f32_bits(UInt32(v.to_bits()))
 
     def write_f64(mut self, v: Float64):
-        self.write_f64_bits(UInt64(v.to_bits()))
+        var bits = UInt64(v.to_bits())
+        self.ensure(9)
+        self.buf[self.pos] = Byte(0xCB)
+        self.pos += 1
+        self.buf[self.pos] = Byte((bits >> UInt64(56)) & UInt64(0xFF))
+        self.buf[self.pos + 1] = Byte((bits >> UInt64(48)) & UInt64(0xFF))
+        self.buf[self.pos + 2] = Byte((bits >> UInt64(40)) & UInt64(0xFF))
+        self.buf[self.pos + 3] = Byte((bits >> UInt64(32)) & UInt64(0xFF))
+        self.buf[self.pos + 4] = Byte((bits >> UInt64(24)) & UInt64(0xFF))
+        self.buf[self.pos + 5] = Byte((bits >> UInt64(16)) & UInt64(0xFF))
+        self.buf[self.pos + 6] = Byte((bits >> UInt64(8)) & UInt64(0xFF))
+        self.buf[self.pos + 7] = Byte(bits & UInt64(0xFF))
+        self.pos += 8
 
     def write_str_header(mut self, n: Int):
         if n <= 31:
@@ -232,6 +270,34 @@ struct WireWriter(Movable):
         var b = v.as_bytes()
         self.write_str_header(len(b))
         self.write_bytes(b)
+
+    def write_lit(mut self, word: UInt64, n: Int):
+        """Store `n` little-endian bytes of `word` (1…8). Used for baked keys."""
+        self.ensure(n)
+        if self.pos + 8 <= len(self.buf):
+            var p = self.buf.unsafe_ptr().unsafe_offset(self.pos)
+            p.unsafe_bitcast[UInt64]()[] = word
+            self.pos += n
+            return
+        var i = 0
+        while i < n:
+            self.buf[self.pos + i] = Byte((word >> UInt64(i * 8)) & UInt64(0xFF))
+            i += 1
+        self.pos += n
+
+    def write_fixstr[origin: ImmOrigin](mut self, data: Span[Byte, origin]):
+        """One-header memcpy of a short UTF-8 key or value (length 0…31)."""
+        var n = len(data)
+        self.ensure(1 + n)
+        self.buf[self.pos] = Byte(0xA0 | n)
+        self.pos += 1
+        if n > 0:
+            unsafe_memcpy(
+                dest=self.buf.unsafe_ptr().unsafe_offset(self.pos),
+                src=data.unsafe_ptr(),
+                count=n,
+            )
+            self.pos += n
 
     def write_bin[origin: ImmOrigin](mut self, data: Span[Byte, origin]):
         self.write_bin_header(len(data))

@@ -17,6 +17,8 @@ from msgpack import (
     encoded_map_header_len,
     encoded_str_len,
 )
+from DocumentMeta import DocumentMeta
+from DocumentItem import DocumentItem
 
 struct Document(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
     var id: String
@@ -46,21 +48,48 @@ struct Document(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
         w.write_map_header(0 + 1 + 1 + 1 + 1)
-        w.write_str("id")
+        w.write_lit(UInt64(6580642), 3)
         w.write_str(self.id)
-        w.write_str("status")
+        w.write_lit(UInt64(32498765033403302), 7)
         w.write_int(self.status)
-        w.write_str("meta")
+        w.write_lit(UInt64(418564631972), 5)
         self.meta.encode_to(w, options)
-        w.write_str("items")
+        w.write_lit(UInt64(126913690757541), 6)
         w.write_array_header(len(self.items))
         var i = 0
         while i < len(self.items):
             self.items[i].encode_to(w, options)
             i += 1
 
+    def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
+        if not r.try_eat_fixstr("id".as_bytes()):
+            return False
+        self.id = r.read_str()
+        if not r.try_eat_fixstr("status".as_bytes()):
+            return False
+        self.status = r.read_i64()
+        if not r.try_eat_fixstr("meta".as_bytes()):
+            return False
+        self.meta = DocumentMeta()
+        self.meta.decode_from(r)
+        if not r.try_eat_fixstr("items".as_bytes()):
+            return False
+        var _ln = r.read_array_header()
+        self.items = List[DocumentItem](capacity=_ln)
+        var _j = 0
+        while _j < _ln:
+            var _it = DocumentItem()
+            _it.decode_from(r)
+            self.items.append(_it^)
+            _j += 1
+        return True
+
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_map_header()
+        var saved = r.pos
+        if n == 4 and self._decode_expected(r):
+            return
+        r.pos = saved
         var i = 0
         while i < n:
             if not r.peek_is_str():
@@ -75,9 +104,16 @@ struct Document(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
                 self.status = r.read_i64()
             elif key == "meta":
                 self.meta = DocumentMeta()
-                    self.meta.decode_from(r)
+                self.meta.decode_from(r)
             elif key == "items":
-                self.items = DocumentItem()
+                var _ln = r.read_array_header()
+                self.items = List[DocumentItem](capacity=_ln)
+                var _j = 0
+                while _j < _ln:
+                    var _it = DocumentItem()
+                    _it.decode_from(r)
+                    self.items.append(_it^)
+                    _j += 1
             else:
                 r.skip_value()
             i += 1

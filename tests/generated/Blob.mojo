@@ -34,11 +34,21 @@ struct Blob(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
         w.write_map_header(0 + 1)
-        w.write_str("data")
+        w.write_lit(UInt64(418564367524), 5)
         w.write_bin(self.data)
+
+    def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
+        if not r.try_eat_fixstr("data".as_bytes()):
+            return False
+        self.data = r.read_bin()
+        return True
 
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_map_header()
+        var saved = r.pos
+        if n == 1 and self._decode_expected(r):
+            return
+        r.pos = saved
         var i = 0
         while i < n:
             if not r.peek_is_str():

@@ -39,14 +39,31 @@ struct LongList(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
         w.write_map_header(0 + 1 + (1 if self.next else 0))
-        w.write_str("value")
+        w.write_lit(UInt64(111555003905701), 6)
         w.write_int(self.value)
         if self.next:
-            w.write_str("next")
+            w.write_lit(UInt64(500236119716), 5)
             w.write_int(self.next.value())
+
+    def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
+        if not r.try_eat_fixstr("value".as_bytes()):
+            return False
+        self.value = r.read_i64()
+        if not r.try_eat_fixstr("next".as_bytes()):
+            return False
+        if r.peek_is_nil():
+            r.read_nil()
+            self.next = None
+        else:
+            self.next = r.read_i64()
+        return True
 
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_map_header()
+        var saved = r.pos
+        if n == 2 and self._decode_expected(r):
+            return
+        r.pos = saved
         var i = 0
         while i < n:
             if not r.peek_is_str():

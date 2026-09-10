@@ -38,13 +38,26 @@ struct DocumentMeta(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
         w.write_map_header(0 + 1 + 1)
-        w.write_str("region")
+        w.write_lit(UInt64(31084745935123110), 7)
         w.write_str(self.region)
-        w.write_str("version")
+        w.write_lit(UInt64(7957695011148363431), 8)
         w.write_int(self.version)
+
+    def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
+        if not r.try_eat_fixstr("region".as_bytes()):
+            return False
+        self.region = r.read_str()
+        if not r.try_eat_fixstr("version".as_bytes()):
+            return False
+        self.version = r.read_i64()
+        return True
 
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_map_header()
+        var saved = r.pos
+        if n == 2 and self._decode_expected(r):
+            return
+        r.pos = saved
         var i = 0
         while i < n:
             if not r.peek_is_str():

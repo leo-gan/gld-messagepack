@@ -42,15 +42,31 @@ struct DocumentItem(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
         w.write_map_header(0 + 1 + 1 + 1)
-        w.write_str("sku")
+        w.write_lit(UInt64(1969976227), 4)
         w.write_str(self.sku)
-        w.write_str("qty")
+        w.write_lit(UInt64(2037674403), 4)
         w.write_int(self.qty)
-        w.write_str("price_minor")
+        w.write_fixstr("price_minor".as_bytes())
         w.write_int(self.price_minor)
+
+    def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
+        if not r.try_eat_fixstr("sku".as_bytes()):
+            return False
+        self.sku = r.read_str()
+        if not r.try_eat_fixstr("qty".as_bytes()):
+            return False
+        self.qty = r.read_i64()
+        if not r.try_eat_fixstr("price_minor".as_bytes()):
+            return False
+        self.price_minor = r.read_i64()
+        return True
 
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_map_header()
+        var saved = r.pos
+        if n == 3 and self._decode_expected(r):
+            return
+        r.pos = saved
         var i = 0
         while i < n:
             if not r.peek_is_str():

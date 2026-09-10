@@ -34,15 +34,30 @@ struct Telemetry(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
         w.write_map_header(0 + 1)
-        w.write_str("values")
+        w.write_lit(UInt64(32481177325631142), 7)
         w.write_array_header(len(self.values))
         var i = 0
         while i < len(self.values):
             w.write_f64(self.values[i])
             i += 1
 
+    def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
+        if not r.try_eat_fixstr("values".as_bytes()):
+            return False
+        var _ln = r.read_array_header()
+        self.values = List[Float64](capacity=_ln)
+        var _j = 0
+        while _j < _ln:
+            self.values.append(r.read_as_f64())
+            _j += 1
+        return True
+
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_map_header()
+        var saved = r.pos
+        if n == 1 and self._decode_expected(r):
+            return
+        r.pos = saved
         var i = 0
         while i < n:
             if not r.peek_is_str():
@@ -52,7 +67,12 @@ struct Telemetry(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
                 continue
             var key = r.read_str()
             if key == "values":
-                self.values = Float64()
+                var _ln = r.read_array_header()
+                self.values = List[Float64](capacity=_ln)
+                var _j = 0
+                while _j < _ln:
+                    self.values.append(r.read_as_f64())
+                    _j += 1
             else:
                 r.skip_value()
             i += 1

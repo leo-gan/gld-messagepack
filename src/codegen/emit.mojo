@@ -113,6 +113,59 @@ def _is_optional(doc: SchemaDoc, tid: Int) -> Bool:
     return doc.types[tid].kind == ST_OPTIONAL
 
 
+def _key_word(name: String) -> UInt64:
+    var b = name.as_bytes()
+    var n = len(b)
+    var w = UInt64(0xA0 | n)
+    var i = 0
+    while i < n:
+        w = w | (UInt64(Int(b[i])) << UInt64(8 * (i + 1)))
+        i += 1
+    return w
+
+
+def _named_refs(
+    doc: SchemaDoc, ty: SchemaType, self_name: String, scc: List[Int], self_id: Int
+) -> List[String]:
+    var out = List[String]()
+    var i = 0
+    while i < len(ty.props):
+        _collect_named(doc, ty.props[i].type_id, self_name, scc, self_id, out)
+        i += 1
+    i = 0
+    while i < len(ty.branch_ids):
+        _collect_named(doc, ty.branch_ids[i], self_name, scc, self_id, out)
+        i += 1
+    return out^
+
+
+def _collect_named(
+    doc: SchemaDoc,
+    tid: Int,
+    self_name: String,
+    scc: List[Int],
+    self_id: Int,
+    mut out: List[String],
+):
+    var t = doc.types[tid].copy()
+    if t.kind == ST_OPTIONAL or t.kind == ST_ARRAY or t.kind == ST_REF or t.kind == ST_ENUM or t.kind == ST_CONST:
+        if t.inner >= 0:
+            _collect_named(doc, t.inner, self_name, scc, self_id, out)
+        return
+    if t.kind != ST_OBJECT and t.kind != ST_UNION:
+        return
+    var n = mojo_ident(t.name)
+    if n == self_name:
+        return
+    var j = 0
+    while j < len(out):
+        if out[j] == n:
+            return
+        j += 1
+    out.append(n)
+
+
+
 def _emit_struct(doc: SchemaDoc, tid: Int, name: String) raises DecodeError -> String:
     var ty = _unwrap(doc, tid).copy()
     var scc = scc_ids(doc)
@@ -134,7 +187,13 @@ def _emit_struct(doc: SchemaDoc, tid: Int, name: String) raises DecodeError -> S
     out += "    encoded_int_len,\n"
     out += "    encoded_map_header_len,\n"
     out += "    encoded_str_len,\n"
-    out += ")\n\n"
+    out += ")\n"
+    var refs = _named_refs(doc, ty, name, scc, tid)
+    var ri = 0
+    while ri < len(refs):
+        out += "from " + refs[ri] + " import " + refs[ri] + "\n"
+        ri += 1
+    out += "\n"
     if ty.kind == ST_UNION:
         return out + _emit_union(doc, ty, name, scc, tid)
     out += (
@@ -300,7 +359,19 @@ def _emit_encode(doc: SchemaDoc, ty: SchemaType, scc: List[Int], self_id: Int) -
             out += "        if self." + fname + ":\n"
             indent = "            "
         if ty.encoding == ENC_MAP:
-            out += indent + "w.write_str(\"" + p.name + "\")\n"
+            if p.name.byte_length() <= 7:
+                out += (
+                    indent
+                    + "w.write_lit(UInt64("
+                    + String(_key_word(p.name))
+                    + "), "
+                    + String(p.name.byte_length() + 1)
+                    + ")\n"
+                )
+            elif p.name.byte_length() <= 31:
+                out += indent + "w.write_fixstr(\"" + p.name + "\".as_bytes())\n"
+            else:
+                out += indent + "w.write_str(\"" + p.name + "\")\n"
         elif ty.encoding == ENC_INTKEYS:
             out += indent + "w.write_int(Int64(" + String(p.int_key) + "))\n"
         if opt and ty.encoding == ENC_ARRAY:
@@ -372,12 +443,17 @@ def _emit_decode(doc: SchemaDoc, ty: SchemaType, scc: List[Int], self_id: Int) -
                 out += "            r.read_nil()\n"
                 out += "            self." + fname + " = None\n"
                 out += "        else:\n"
-                out += "            " + _dec_stmt(doc, p.type_id, "self." + fname, scc, self_id) + "\n"
+                out += "            " + _dec_stmt(doc, p.type_id, "self." + fname, scc, self_id, "            ") + "\n"
             else:
-                out += "        " + _dec_stmt(doc, p.type_id, "self." + fname, scc, self_id) + "\n"
+                out += "        " + _dec_stmt(doc, p.type_id, "self." + fname, scc, self_id, "        ") + "\n"
             i += 1
         return out
     out += "        var n = r.read_map_header()\n"
+    if ty.encoding == ENC_MAP:
+        out += "        var saved = r.pos\n"
+        out += "        if n == " + String(len(ty.props)) + " and self._decode_expected(r):\n"
+        out += "            return\n"
+        out += "        r.pos = saved\n"
     out += "        var i = 0\n"
     out += "        while i < n:\n"
     if ty.encoding == ENC_INTKEYS:
@@ -415,9 +491,9 @@ def _emit_decode(doc: SchemaDoc, ty: SchemaType, scc: List[Int], self_id: Int) -
             out += "                    r.read_nil()\n"
             out += "                    self." + fname + " = None\n"
             out += "                else:\n"
-            out += "                    " + _dec_stmt(doc, p.type_id, "self." + fname, scc, self_id) + "\n"
+            out += "                    " + _dec_stmt(doc, p.type_id, "self." + fname, scc, self_id, "                    ") + "\n"
         else:
-            out += "                " + _dec_stmt(doc, p.type_id, "self." + fname, scc, self_id) + "\n"
+            out += "                " + _dec_stmt(doc, p.type_id, "self." + fname, scc, self_id, "                ") + "\n"
         j += 1
     if len(ty.props) == 0:
         out += "            r.skip_value()\n"
@@ -425,15 +501,64 @@ def _emit_decode(doc: SchemaDoc, ty: SchemaType, scc: List[Int], self_id: Int) -
         out += "            else:\n"
         out += "                r.skip_value()\n"
     out += "            i += 1\n"
+    if ty.encoding == ENC_MAP:
+        out = _emit_expected_decode(doc, ty, scc, self_id) + out
     return out
 
 
-def _dec_stmt(doc: SchemaDoc, tid: Int, acc: String, scc: List[Int], self_id: Int) -> String:
+def _emit_expected_decode(
+    doc: SchemaDoc, ty: SchemaType, scc: List[Int], self_id: Int
+) -> String:
+    var out = String()
+    out += "\n    def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:\n"
+    var i = 0
+    while i < len(ty.props):
+        var p = ty.props[i].copy()
+        var fname = mojo_ident(p.name)
+        if p.name.byte_length() <= 31:
+            out += (
+                "        if not r.try_eat_fixstr(\""
+                + p.name
+                + "\".as_bytes()):\n            return False\n"
+            )
+        else:
+            out += (
+                "        if not r.peek_is_str():\n            return False\n"
+                + "        if r.read_str() != \""
+                + p.name
+                + "\":\n            return False\n"
+            )
+        var opt = _is_optional(doc, p.type_id)
+        if opt:
+            out += "        if r.peek_is_nil():\n"
+            out += "            r.read_nil()\n"
+            out += "            self." + fname + " = None\n"
+            out += "        else:\n"
+            out += (
+                "            "
+                + _dec_stmt(doc, p.type_id, "self." + fname, scc, self_id, "            ")
+                + "\n"
+            )
+        else:
+            out += (
+                "        "
+                + _dec_stmt(doc, p.type_id, "self." + fname, scc, self_id, "        ")
+                + "\n"
+            )
+        i += 1
+    out += "        return True\n"
+    return out
+
+
+
+def _dec_stmt(
+    doc: SchemaDoc, tid: Int, acc: String, scc: List[Int], self_id: Int, indent: String = "        "
+) -> String:
     var t = doc.types[tid].copy()
     if t.kind == ST_OPTIONAL:
-        return _dec_stmt(doc, t.inner, acc, scc, self_id)
+        return _dec_stmt(doc, t.inner, acc, scc, self_id, indent)
     if t.kind == ST_REF or t.kind == ST_ENUM or t.kind == ST_CONST:
-        return _dec_stmt(doc, t.inner, acc, scc, self_id)
+        return _dec_stmt(doc, t.inner, acc, scc, self_id, indent)
     if t.kind == ST_BOOL:
         return acc + " = r.read_bool()"
     if t.kind == ST_INT:
@@ -446,43 +571,69 @@ def _dec_stmt(doc: SchemaDoc, tid: Int, acc: String, scc: List[Int], self_id: In
         return acc + " = r.read_bin()"
     if t.kind == ST_TIMESTAMP:
         return (
-            "var _ts = r.read_timestamp()\n                    "
+            "var _ts = r.read_timestamp()\n"
+            + indent
             + acc
             + " = MsgpackTimestamp(_ts[0], _ts[1])"
         )
     if t.kind == ST_EXT:
         return (
-            "var _e = r.read_ext()\n                    "
-            + acc
-            + " = MsgpackExt(_e[0], _e[1])"
+            "var _e = r.read_ext()\n" + indent + acc + " = MsgpackExt(_e[0], _e[1])"
         )
     if t.kind == ST_ARRAY:
-        return acc + " = " + _dec_list(doc, t.inner, scc, self_id)
+        return _dec_list_block(doc, t.inner, acc, scc, self_id, indent)
     var tn = _type_name(doc, tid, scc, self_id)
     if _starts(tn, "Box["):
         var inner = _inner(tn)
         return (
             "var _c = "
             + inner
-            + "()\n                    _c.decode_from(r)\n                    "
+            + "()\n"
+            + indent
+            + "_c.decode_from(r)\n"
+            + indent
             + acc
             + " = Box["
             + inner
             + "](_c^)"
         )
-    return (
-        acc
-        + " = "
-        + tn
-        + "()\n                    "
-        + acc
-        + ".decode_from(r)"
-    )
+    return acc + " = " + tn + "()\n" + indent + acc + ".decode_from(r)"
 
 
-def _dec_list(doc: SchemaDoc, tid: Int, scc: List[Int], self_id: Int) -> String:
+def _dec_list_block(
+    doc: SchemaDoc,
+    tid: Int,
+    acc: String,
+    scc: List[Int],
+    self_id: Int,
+    indent: String,
+) -> String:
     var elem = _type_name(doc, tid, scc, -1)
-    return elem + "()"
+    var out = String()
+    out += "var _ln = r.read_array_header()\n"
+    out += indent + acc + " = List[" + elem + "](capacity=_ln)\n"
+    out += indent + "var _j = 0\n"
+    out += indent + "while _j < _ln:\n"
+    var inner = doc.types[tid].copy()
+    while inner.kind == ST_REF or inner.kind == ST_OPTIONAL or inner.kind == ST_ENUM or inner.kind == ST_CONST:
+        if inner.inner < 0:
+            break
+        inner = doc.types[inner.inner].copy()
+    var body = indent + "    "
+    if inner.kind == ST_NUMBER:
+        out += body + acc + ".append(r.read_as_f64())\n"
+    elif inner.kind == ST_STRING:
+        out += body + acc + ".append(r.read_str())\n"
+    elif inner.kind == ST_INT:
+        out += body + acc + ".append(r.read_i64())\n"
+    elif inner.kind == ST_BOOL:
+        out += body + acc + ".append(r.read_bool())\n"
+    else:
+        out += body + "var _it = " + elem + "()\n"
+        out += body + "_it.decode_from(r)\n"
+        out += body + acc + ".append(_it^)\n"
+    out += body + "_j += 1"
+    return out
 
 
 def _emit_union(

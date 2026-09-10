@@ -34,11 +34,22 @@ struct Stamp(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
         w.write_map_header(0 + 1)
-        w.write_str("when")
+        w.write_lit(UInt64(474147747748), 5)
         self.when.encode_to(w)
+
+    def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
+        if not r.try_eat_fixstr("when".as_bytes()):
+            return False
+        var _ts = r.read_timestamp()
+        self.when = MsgpackTimestamp(_ts[0], _ts[1])
+        return True
 
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_map_header()
+        var saved = r.pos
+        if n == 1 and self._decode_expected(r):
+            return
+        r.pos = saved
         var i = 0
         while i < n:
             if not r.peek_is_str():
@@ -49,7 +60,7 @@ struct Stamp(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
             var key = r.read_str()
             if key == "when":
                 var _ts = r.read_timestamp()
-                    self.when = MsgpackTimestamp(_ts[0], _ts[1])
+                self.when = MsgpackTimestamp(_ts[0], _ts[1])
             else:
                 r.skip_value()
             i += 1
