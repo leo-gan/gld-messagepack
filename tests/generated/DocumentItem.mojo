@@ -41,19 +41,30 @@ struct DocumentItem(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.ensure(512)
+        w.ensure(self.encoded_len(options) + 16)
         var p = w.pos
-        w.buf[p] = Byte(128 + 0 + 1 + 1 + 1)
-        p += 1
+        var _mc = 0 + 1 + 1 + 1
+        if _mc <= 15:
+            w.buf[p] = Byte(128 + _mc)
+            p += 1
+        else:
+            w.pos = p
+            w.write_map_header(_mc)
+            p = w.pos
         w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(1969976227)
         p += 4
         var _sb_sku = self.sku.as_bytes()
         var _sn_sku = len(_sb_sku)
-        w.buf[p] = Byte(160 + _sn_sku)
-        p += 1
-        if _sn_sku > 0:
+        if _sn_sku <= 31:
+            w.buf[p] = Byte(160 + _sn_sku)
+            p += 1
+            if _sn_sku > 0:
+                w.pos = p
+                w.write_bytes(_sb_sku)
+                p = w.pos
+        else:
             w.pos = p
-            w.write_bytes(_sb_sku)
+            w.write_str(self.sku)
             p = w.pos
         w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(2037674403)
         p += 4
@@ -97,6 +108,9 @@ struct DocumentItem(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
         if n == 3 and self._decode_expected(r):
             return
         r.pos = saved
+        var seen_sku = False
+        var seen_qty = False
+        var seen_price_minor = False
         var i = 0
         while i < n:
             if not r.peek_is_str():
@@ -106,11 +120,20 @@ struct DocumentItem(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
                 continue
             var key = r.read_str()
             if key == "sku":
+                seen_sku = True
                 self.sku = r.read_str()
             elif key == "qty":
+                seen_qty = True
                 self.qty = r.read_i64()
             elif key == "price_minor":
+                seen_price_minor = True
                 self.price_minor = r.read_i64()
             else:
                 r.skip_value()
             i += 1
+        if not seen_sku:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_qty:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_price_minor:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())

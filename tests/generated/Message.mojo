@@ -61,10 +61,16 @@ struct Message(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.ensure(512)
+        w.ensure(self.encoded_len(options) + 16)
         var p = w.pos
-        w.buf[p] = Byte(128 + 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1)
-        p += 1
+        var _mc = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1
+        if _mc <= 15:
+            w.buf[p] = Byte(128 + _mc)
+            p += 1
+        else:
+            w.pos = p
+            w.write_map_header(_mc)
+            p = w.pos
         w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(30521821667223206 | ((UInt64(194) + UInt64(Int(self.f_bool))) << UInt64(56)))
         p += 8
         w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(3617362943271724711)
@@ -101,11 +107,16 @@ struct Message(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
         p += 1
         var _sb_f_string = self.f_string.as_bytes()
         var _sn_f_string = len(_sb_f_string)
-        w.buf[p] = Byte(160 + _sn_f_string)
-        p += 1
-        if _sn_f_string > 0:
+        if _sn_f_string <= 31:
+            w.buf[p] = Byte(160 + _sn_f_string)
+            p += 1
+            if _sn_f_string > 0:
+                w.pos = p
+                w.write_bytes(_sb_f_string)
+                p = w.pos
+        else:
             w.pos = p
-            w.write_bytes(_sb_f_string)
+            w.write_str(self.f_string)
             p = w.pos
         w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(6875993255270377128)
         p += 8
@@ -134,11 +145,16 @@ struct Message(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
         p += 3
         var _sb_f_string_2 = self.f_string_2.as_bytes()
         var _sn_f_string_2 = len(_sb_f_string_2)
-        w.buf[p] = Byte(160 + _sn_f_string_2)
-        p += 1
-        if _sn_f_string_2 > 0:
+        if _sn_f_string_2 <= 31:
+            w.buf[p] = Byte(160 + _sn_f_string_2)
+            p += 1
+            if _sn_f_string_2 > 0:
+                w.pos = p
+                w.write_bytes(_sb_f_string_2)
+                p = w.pos
+        else:
             w.pos = p
-            w.write_bytes(_sb_f_string_2)
+            w.write_str(self.f_string_2)
             p = w.pos
         w.pos = p
 
@@ -175,6 +191,14 @@ struct Message(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
         if n == 8 and self._decode_expected(r):
             return
         r.pos = saved
+        var seen_f_bool = False
+        var seen_f_int32 = False
+        var seen_f_int64 = False
+        var seen_f_float64 = False
+        var seen_f_string = False
+        var seen_f_bool_2 = False
+        var seen_f_int32_2 = False
+        var seen_f_string_2 = False
         var i = 0
         while i < n:
             if not r.peek_is_str():
@@ -184,21 +208,45 @@ struct Message(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
                 continue
             var key = r.read_str()
             if key == "f_bool":
+                seen_f_bool = True
                 self.f_bool = r.read_bool()
             elif key == "f_int32":
+                seen_f_int32 = True
                 self.f_int32 = r.read_i64()
             elif key == "f_int64":
+                seen_f_int64 = True
                 self.f_int64 = r.read_i64()
             elif key == "f_float64":
+                seen_f_float64 = True
                 self.f_float64 = r.read_as_f64()
             elif key == "f_string":
+                seen_f_string = True
                 self.f_string = r.read_str()
             elif key == "f_bool_2":
+                seen_f_bool_2 = True
                 self.f_bool_2 = r.read_bool()
             elif key == "f_int32_2":
+                seen_f_int32_2 = True
                 self.f_int32_2 = r.read_i64()
             elif key == "f_string_2":
+                seen_f_string_2 = True
                 self.f_string_2 = r.read_str()
             else:
                 r.skip_value()
             i += 1
+        if not seen_f_bool:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_f_int32:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_f_int64:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_f_float64:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_f_string:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_f_bool_2:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_f_int32_2:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_f_string_2:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())

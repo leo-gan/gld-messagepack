@@ -47,19 +47,30 @@ struct Document(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.ensure(512)
+        w.ensure(self.encoded_len(options) + 16)
         var p = w.pos
-        w.buf[p] = Byte(128 + 0 + 1 + 1 + 1 + 1)
-        p += 1
+        var _mc = 0 + 1 + 1 + 1 + 1
+        if _mc <= 15:
+            w.buf[p] = Byte(128 + _mc)
+            p += 1
+        else:
+            w.pos = p
+            w.write_map_header(_mc)
+            p = w.pos
         w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(6580642)
         p += 3
         var _sb_id = self.id.as_bytes()
         var _sn_id = len(_sb_id)
-        w.buf[p] = Byte(160 + _sn_id)
-        p += 1
-        if _sn_id > 0:
+        if _sn_id <= 31:
+            w.buf[p] = Byte(160 + _sn_id)
+            p += 1
+            if _sn_id > 0:
+                w.pos = p
+                w.write_bytes(_sb_id)
+                p = w.pos
+        else:
             w.pos = p
-            w.write_bytes(_sb_id)
+            w.write_str(self.id)
             p = w.pos
         w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(32498765033403302)
         p += 7
@@ -116,6 +127,10 @@ struct Document(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
         if n == 4 and self._decode_expected(r):
             return
         r.pos = saved
+        var seen_id = False
+        var seen_status = False
+        var seen_meta = False
+        var seen_items = False
         var i = 0
         while i < n:
             if not r.peek_is_str():
@@ -125,13 +140,17 @@ struct Document(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
                 continue
             var key = r.read_str()
             if key == "id":
+                seen_id = True
                 self.id = r.read_str()
             elif key == "status":
+                seen_status = True
                 self.status = r.read_i64()
             elif key == "meta":
+                seen_meta = True
                 self.meta = DocumentMeta()
                 self.meta.decode_from(r)
             elif key == "items":
+                seen_items = True
                 var _ln = r.read_array_header()
                 self.items = List[DocumentItem](capacity=_ln)
                 var _j = 0
@@ -143,3 +162,11 @@ struct Document(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
             else:
                 r.skip_value()
             i += 1
+        if not seen_id:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_status:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_meta:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_items:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())

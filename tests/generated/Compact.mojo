@@ -35,7 +35,7 @@ struct Compact(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.ensure(512)
+        w.ensure(self.encoded_len(options) + 16)
         var p = w.pos
         w.buf[p] = Byte(146)
         p += 1

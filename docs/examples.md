@@ -19,7 +19,8 @@ def main() raises:
     print(back.f_int64)
 ```
 
-`encode_into` writes into a reused `List[Byte]` and returns the byte count.
+`encode_into` writes into a reused `List[Byte]` and returns the live byte
+count. The list may be larger than that count. Pass `dest[0:n]` to `decode`.
 
 ## Dynamic value
 

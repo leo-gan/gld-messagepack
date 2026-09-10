@@ -354,14 +354,25 @@ def _emit_encode(doc: SchemaDoc, ty: SchemaType, scc: List[Int], self_id: Int) -
     var out = String()
     out += "\n    def encode_to(self, mut w: WireWriter, options: EncodeOptions):\n"
     out += "        _ = options\n"
-    out += "        w.ensure(512)\n"
+    out += "        w.ensure(self.encoded_len(options) + 16)\n"
     out += "        var p = w.pos\n"
     if ty.encoding == ENC_ARRAY:
-        out += "        w.buf[p] = Byte(" + String(0x90 + len(ty.props)) + ")\n"
-        out += "        p += 1\n"
+        if len(ty.props) <= 15:
+            out += "        w.buf[p] = Byte(" + String(0x90 + len(ty.props)) + ")\n"
+            out += "        p += 1\n"
+        else:
+            out += "        w.pos = p\n"
+            out += "        w.write_array_header(" + String(len(ty.props)) + ")\n"
+            out += "        p = w.pos\n"
     else:
-        out += "        w.buf[p] = Byte(" + String(0x80) + " + " + _present_count_expr(ty) + ")\n"
-        out += "        p += 1\n"
+        out += "        var _mc = " + _present_count_expr(ty) + "\n"
+        out += "        if _mc <= 15:\n"
+        out += "            w.buf[p] = Byte(128 + _mc)\n"
+        out += "            p += 1\n"
+        out += "        else:\n"
+        out += "            w.pos = p\n"
+        out += "            w.write_map_header(_mc)\n"
+        out += "            p = w.pos\n"
     var i = 0
     while i < len(ty.props):
         var pr = ty.props[i].copy()
@@ -508,13 +519,52 @@ def _enc_raw(
     if t.kind == ST_STRING:
         var out = indent + "var _sb_" + tag + " = " + acc + ".as_bytes()\n"
         out += indent + "var _sn_" + tag + " = len(_sb_" + tag + ")\n"
-        out += indent + "w.buf[p] = Byte(160 + _sn_" + tag + ")\n"
-        out += indent + "p += 1\n"
-        out += indent + "if _sn_" + tag + " > 0:\n"
+        out += indent + "if _sn_" + tag + " <= 31:\n"
+        out += indent + "    w.buf[p] = Byte(160 + _sn_" + tag + ")\n"
+        out += indent + "    p += 1\n"
+        out += indent + "    if _sn_" + tag + " > 0:\n"
+        out += indent + "        w.pos = p\n"
+        out += indent + "        w.write_bytes(_sb_" + tag + ")\n"
+        out += indent + "        p = w.pos\n"
+        out += indent + "else:\n"
         out += indent + "    w.pos = p\n"
-        out += indent + "    w.write_bytes(_sb_" + tag + ")\n"
+        out += indent + "    w.write_str(" + acc + ")\n"
         out += indent + "    p = w.pos\n"
         return out
+    if t.kind == ST_BYTES:
+        return (
+            indent
+            + "w.pos = p\n"
+            + indent
+            + "w.write_bin("
+            + acc
+            + ")\n"
+            + indent
+            + "p = w.pos\n"
+        )
+    if t.kind == ST_EXT:
+        return (
+            indent
+            + "w.pos = p\n"
+            + indent
+            + "w.write_ext("
+            + acc
+            + ".type, "
+            + acc
+            + ".data)\n"
+            + indent
+            + "p = w.pos\n"
+        )
+    if t.kind == ST_TIMESTAMP:
+        return (
+            indent
+            + "w.pos = p\n"
+            + indent
+            + acc
+            + ".encode_to(w)\n"
+            + indent
+            + "p = w.pos\n"
+        )
     if t.kind == ST_ARRAY:
         var inner = doc.types[t.inner].copy()
         while inner.kind == ST_REF or inner.kind == ST_OPTIONAL:
@@ -622,6 +672,12 @@ def _emit_decode(doc: SchemaDoc, ty: SchemaType, scc: List[Int], self_id: Int) -
         out += "        if n == " + String(len(ty.props)) + " and self._decode_expected(r):\n"
         out += "            return\n"
         out += "        r.pos = saved\n"
+    var ri = 0
+    while ri < len(ty.props):
+        var rp = ty.props[ri].copy()
+        if not _is_optional(doc, rp.type_id):
+            out += "        var seen_" + mojo_ident(rp.name) + " = False\n"
+        ri += 1
     out += "        var i = 0\n"
     out += "        while i < n:\n"
     if ty.encoding == ENC_INTKEYS:
@@ -661,6 +717,7 @@ def _emit_decode(doc: SchemaDoc, ty: SchemaType, scc: List[Int], self_id: Int) -
             out += "                else:\n"
             out += "                    " + _dec_stmt(doc, p.type_id, "self." + fname, scc, self_id, "                    ") + "\n"
         else:
+            out += "                seen_" + fname + " = True\n"
             out += "                " + _dec_stmt(doc, p.type_id, "self." + fname, scc, self_id, "                ") + "\n"
         j += 1
     if len(ty.props) == 0:
@@ -669,6 +726,14 @@ def _emit_decode(doc: SchemaDoc, ty: SchemaType, scc: List[Int], self_id: Int) -
         out += "            else:\n"
         out += "                r.skip_value()\n"
     out += "            i += 1\n"
+    var rj = 0
+    while rj < len(ty.props):
+        var rq = ty.props[rj].copy()
+        if not _is_optional(doc, rq.type_id):
+            var reqn = mojo_ident(rq.name)
+            out += "        if not seen_" + reqn + ":\n"
+            out += "            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())\n"
+        rj += 1
     if ty.encoding == ENC_MAP:
         out = _emit_expected_decode(doc, ty, scc, self_id) + out
     return out

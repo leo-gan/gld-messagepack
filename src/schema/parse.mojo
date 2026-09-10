@@ -123,14 +123,16 @@ def _allowed(k: String) -> Bool:
 
 
 def _collect_defs(v: ReadValue, mut doc: SchemaDoc) raises DecodeError:
-    var key = String()
     if _has(v, "$defs"):
-        key = String("$defs")
-    elif _has(v, "definitions"):
-        key = String("definitions")
-    else:
+        var defs = v.get("$defs")
+        _collect_defs_obj(defs, doc)
         return
-    var defs = v.get(key)
+    if _has(v, "definitions"):
+        var defs2 = v.get("definitions")
+        _collect_defs_obj(defs2, doc)
+
+
+def _collect_defs_obj(defs: ReadValue, mut doc: SchemaDoc) raises DecodeError:
     if not defs.is_object():
         raise DecodeError(DecodeError.KIND_SCHEMA, 0)
     var i = 0
@@ -378,13 +380,18 @@ def _resolve_ref(ref_path: String, mut doc: SchemaDoc) raises DecodeError -> Int
         return doc.root
     var prefix_defs = String("#/$defs/")
     var prefix_old = String("#/definitions/")
-    var name = String()
     if _starts(ref_path, prefix_defs):
-        name = _cut(ref_path, prefix_defs.byte_length(), ref_path.byte_length())
-    elif _starts(ref_path, prefix_old):
-        name = _cut(ref_path, prefix_old.byte_length(), ref_path.byte_length())
-    else:
-        raise DecodeError(DecodeError.KIND_SCHEMA, 0)
+        return _lookup_def(
+            _cut(ref_path, prefix_defs.byte_length(), ref_path.byte_length()), doc
+        )
+    if _starts(ref_path, prefix_old):
+        return _lookup_def(
+            _cut(ref_path, prefix_old.byte_length(), ref_path.byte_length()), doc
+        )
+    raise DecodeError(DecodeError.KIND_SCHEMA, 0)
+
+
+def _lookup_def(name: String, mut doc: SchemaDoc) raises DecodeError -> Int:
     var i = 0
     while i < len(doc.def_names):
         if doc.def_names[i] == name:

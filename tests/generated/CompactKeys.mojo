@@ -37,10 +37,16 @@ struct CompactKeys(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.ensure(512)
+        w.ensure(self.encoded_len(options) + 16)
         var p = w.pos
-        w.buf[p] = Byte(128 + 0 + 1 + 1)
-        p += 1
+        var _mc = 0 + 1 + 1
+        if _mc <= 15:
+            w.buf[p] = Byte(128 + _mc)
+            p += 1
+        else:
+            w.pos = p
+            w.write_map_header(_mc)
+            p = w.pos
         var _iv_ka = Int64(0)
         if _iv_ka >= Int64(-32) and _iv_ka <= Int64(127):
             w.buf[p] = Byte(Int(_iv_ka) & 255)
@@ -74,6 +80,8 @@ struct CompactKeys(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_map_header()
+        var seen_a = False
+        var seen_b = False
         var i = 0
         while i < n:
             var key = r.read_int_key()
@@ -83,9 +91,15 @@ struct CompactKeys(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
                 continue
             var k = key.value()
             if k == Int64(0):
+                seen_a = True
                 self.a = r.read_bool()
             elif k == Int64(1):
+                seen_b = True
                 self.b = r.read_i64()
             else:
                 r.skip_value()
             i += 1
+        if not seen_a:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_b:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())

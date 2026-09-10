@@ -38,10 +38,16 @@ struct LongList(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.ensure(512)
+        w.ensure(self.encoded_len(options) + 16)
         var p = w.pos
-        w.buf[p] = Byte(128 + 0 + 1 + (1 if self.next else 0))
-        p += 1
+        var _mc = 0 + 1 + (1 if self.next else 0)
+        if _mc <= 15:
+            w.buf[p] = Byte(128 + _mc)
+            p += 1
+        else:
+            w.pos = p
+            w.write_map_header(_mc)
+            p = w.pos
         w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(111555003905701)
         p += 6
         var _iv_value = self.value
@@ -84,6 +90,7 @@ struct LongList(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
         if n == 2 and self._decode_expected(r):
             return
         r.pos = saved
+        var seen_value = False
         var i = 0
         while i < n:
             if not r.peek_is_str():
@@ -93,6 +100,7 @@ struct LongList(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
                 continue
             var key = r.read_str()
             if key == "value":
+                seen_value = True
                 self.value = r.read_i64()
             elif key == "next":
                 if r.peek_is_nil():
@@ -103,3 +111,5 @@ struct LongList(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
             else:
                 r.skip_value()
             i += 1
+        if not seen_value:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())

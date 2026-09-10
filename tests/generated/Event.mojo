@@ -38,10 +38,16 @@ struct Event(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.ensure(512)
+        w.ensure(self.encoded_len(options) + 16)
         var p = w.pos
-        w.buf[p] = Byte(128 + 0 + 1 + 1)
-        p += 1
+        var _mc = 0 + 1 + 1
+        if _mc <= 15:
+            w.buf[p] = Byte(128 + _mc)
+            p += 1
+        else:
+            w.pos = p
+            w.write_map_header(_mc)
+            p = w.pos
         w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(7566498)
         p += 3
         var _iv_ts = self.ts
@@ -85,6 +91,8 @@ struct Event(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
         if n == 2 and self._decode_expected(r):
             return
         r.pos = saved
+        var seen_ts = False
+        var seen_attrs = False
         var i = 0
         while i < n:
             if not r.peek_is_str():
@@ -94,8 +102,10 @@ struct Event(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
                 continue
             var key = r.read_str()
             if key == "ts":
+                seen_ts = True
                 self.ts = r.read_i64()
             elif key == "attrs":
+                seen_attrs = True
                 var _ln = r.read_array_header()
                 self.attrs = List[EventAttr](capacity=_ln)
                 var _j = 0
@@ -107,3 +117,7 @@ struct Event(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
             else:
                 r.skip_value()
             i += 1
+        if not seen_ts:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
+        if not seen_attrs:
+            raise DecodeError(DecodeError.KIND_SCHEMA, r.position())
