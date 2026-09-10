@@ -43,6 +43,11 @@ struct Telemetry(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
         if _an_values <= 15:
             w.buf[p] = Byte(144 + _an_values)
             p += 1
+        elif _an_values <= 65535:
+            w.buf[p] = Byte(220)
+            w.buf[p + 1] = Byte(_an_values >> 8)
+            w.buf[p + 2] = Byte(_an_values & 255)
+            p += 3
         else:
             w.pos = p
             w.write_array_header(_an_values)
