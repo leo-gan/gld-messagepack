@@ -37,11 +37,40 @@ struct CompactKeys(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1 + 1)
-        w.write_int(Int64(0))
-        w.write_bool(self.a)
-        w.write_int(Int64(1))
-        w.write_int(self.b)
+        w.ensure(512)
+        var p = w.pos
+        w.buf[p] = Byte(128 + 0 + 1 + 1)
+        p += 1
+        var _iv_ka = Int64(0)
+        if _iv_ka >= Int64(-32) and _iv_ka <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_ka) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_ka)
+            p = w.pos
+        if self.a:
+            w.buf[p] = Byte(195)
+        else:
+            w.buf[p] = Byte(194)
+        p += 1
+        var _iv_kb = Int64(1)
+        if _iv_kb >= Int64(-32) and _iv_kb <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_kb) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_kb)
+            p = w.pos
+        var _iv_b = self.b
+        if _iv_b >= Int64(-32) and _iv_b <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_b) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_b)
+            p = w.pos
+        w.pos = p
 
     def decode_from[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError:
         var n = r.read_map_header()

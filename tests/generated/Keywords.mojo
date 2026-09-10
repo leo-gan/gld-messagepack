@@ -45,15 +45,43 @@ struct Keywords(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1 + 1 + 1 + 1)
-        w.write_lit(UInt64(32760453380993958), 7)
-        w.write_int(self.struct_)
-        w.write_lit(UInt64(7235234), 3)
-        w.write_int(self.fn_)
-        w.write_lit(UInt64(1918989987), 4)
-        w.write_str(self.var_)
-        w.write_lit(UInt64(114776363593125), 6)
-        w.write_bool(self.match_)
+        w.ensure(512)
+        var p = w.pos
+        w.buf[p] = Byte(128 + 0 + 1 + 1 + 1 + 1)
+        p += 1
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(32760453380993958)
+        p += 7
+        var _iv_struct_ = self.struct_
+        if _iv_struct_ >= Int64(-32) and _iv_struct_ <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_struct_) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_struct_)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(7235234)
+        p += 3
+        var _iv_fn_ = self.fn_
+        if _iv_fn_ >= Int64(-32) and _iv_fn_ <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_fn_) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_fn_)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(1918989987)
+        p += 4
+        var _sb_var_ = self.var_.as_bytes()
+        var _sn_var_ = len(_sb_var_)
+        w.buf[p] = Byte(160 + _sn_var_)
+        p += 1
+        if _sn_var_ > 0:
+            w.pos = p
+            w.write_bytes(_sb_var_)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(114776363593125 | ((UInt64(194) + UInt64(Int(self.match_))) << UInt64(48)))
+        p += 7
+        w.pos = p
 
     def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
         if not r.try_eat_fixstr("struct".as_bytes()):

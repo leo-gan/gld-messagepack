@@ -36,15 +36,17 @@ def encode_into[
 ](
     value: T, mut dest: List[Byte], options: EncodeOptions = EncodeOptions.default
 ) -> Int:
-    """Write into `dest`, reusing its allocation. Returns the byte count."""
-    var cap = len(dest)
-    if cap < 64:
-        cap = 256
-        dest.resize(unsafe_uninit_length=cap)
+    """Write into `dest`, reusing its allocation. Returns the byte count.
+
+    `dest` is grown to at least 512 bytes and is not shrunk. Callers must
+    use the returned count as the live prefix.
+    """
+    if len(dest) < 512:
+        dest.resize(unsafe_uninit_length=512)
     var w = WireWriter(dest^, pos=0)
     value.encode_to(w, options)
     var n = w.pos
-    dest = w^.finish()
+    dest = w^.finish_keep()
     return n
 
 

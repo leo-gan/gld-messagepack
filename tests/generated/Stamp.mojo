@@ -33,9 +33,16 @@ struct Stamp(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1)
-        w.write_lit(UInt64(474147747748), 5)
-        self.when.encode_to(w)
+        w.ensure(512)
+        var p = w.pos
+        w.buf[p] = Byte(128 + 0 + 1)
+        p += 1
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(474147747748)
+        p += 5
+        w.pos = p
+        self.when.encode_to(w, options)
+        p = w.pos
+        w.pos = p
 
     def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
         if not r.try_eat_fixstr("when".as_bytes()):

@@ -33,13 +33,20 @@ struct Strings(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1)
-        w.write_lit(UInt64(126913690757541), 6)
+        w.ensure(512)
+        var p = w.pos
+        w.buf[p] = Byte(128 + 0 + 1)
+        p += 1
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(126913690757541)
+        p += 6
+        w.pos = p
         w.write_array_header(len(self.items))
         var i = 0
         while i < len(self.items):
             w.write_str(self.items[i])
             i += 1
+        p = w.pos
+        w.pos = p
 
     def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
         if not r.try_eat_fixstr("items".as_bytes()):

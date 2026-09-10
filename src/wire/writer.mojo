@@ -172,15 +172,16 @@ struct WireWriter(Movable):
             self.write_byte(Byte(0xC2))
 
     def write_int(mut self, v: Int64):
-        if v >= Int64(0) and v <= Int64(127):
-            self.write_byte(Byte(Int(v)))
-            return
-        if v >= Int64(-32) and v <= Int64(-1):
-            self.write_byte(Byte(Int(v) & 0xFF))
+        if v >= Int64(-32) and v <= Int64(127):
+            self.ensure(1)
+            self.buf[self.pos] = Byte(Int(v) & 0xFF)
+            self.pos += 1
             return
         if v >= Int64(128) and v <= Int64(255):
-            self.write_byte(Byte(0xCC))
-            self.write_byte(Byte(Int(v)))
+            self.ensure(2)
+            self.buf[self.pos] = Byte(0xCC)
+            self.buf[self.pos + 1] = Byte(Int(v))
+            self.pos += 2
             return
         if v >= Int64(-128) and v <= Int64(-33):
             self.write_byte(Byte(0xD0))
@@ -231,16 +232,18 @@ struct WireWriter(Movable):
         var bits = UInt64(v.to_bits())
         self.ensure(9)
         self.buf[self.pos] = Byte(0xCB)
-        self.pos += 1
-        self.buf[self.pos] = Byte((bits >> UInt64(56)) & UInt64(0xFF))
-        self.buf[self.pos + 1] = Byte((bits >> UInt64(48)) & UInt64(0xFF))
-        self.buf[self.pos + 2] = Byte((bits >> UInt64(40)) & UInt64(0xFF))
-        self.buf[self.pos + 3] = Byte((bits >> UInt64(32)) & UInt64(0xFF))
-        self.buf[self.pos + 4] = Byte((bits >> UInt64(24)) & UInt64(0xFF))
-        self.buf[self.pos + 5] = Byte((bits >> UInt64(16)) & UInt64(0xFF))
-        self.buf[self.pos + 6] = Byte((bits >> UInt64(8)) & UInt64(0xFF))
-        self.buf[self.pos + 7] = Byte(bits & UInt64(0xFF))
-        self.pos += 8
+        var be = (
+            ((bits & UInt64(0x00000000000000FF)) << UInt64(56))
+            | ((bits & UInt64(0x000000000000FF00)) << UInt64(40))
+            | ((bits & UInt64(0x0000000000FF0000)) << UInt64(24))
+            | ((bits & UInt64(0x00000000FF000000)) << UInt64(8))
+            | ((bits & UInt64(0x000000FF00000000)) >> UInt64(8))
+            | ((bits & UInt64(0x0000FF0000000000)) >> UInt64(24))
+            | ((bits & UInt64(0x00FF000000000000)) >> UInt64(40))
+            | ((bits & UInt64(0xFF00000000000000)) >> UInt64(56))
+        )
+        self.buf.unsafe_ptr().unsafe_offset(self.pos + 1).unsafe_bitcast[UInt64]()[] = be
+        self.pos += 9
 
     def write_str_header(mut self, n: Int):
         if n <= 31:
@@ -268,7 +271,11 @@ struct WireWriter(Movable):
 
     def write_str(mut self, v: String):
         var b = v.as_bytes()
-        self.write_str_header(len(b))
+        var n = len(b)
+        if n <= 31:
+            self.write_fixstr(b)
+            return
+        self.write_str_header(n)
         self.write_bytes(b)
 
     def write_lit(mut self, word: UInt64, n: Int):
@@ -360,4 +367,8 @@ struct WireWriter(Movable):
     def finish(deinit self) -> List[Byte]:
         if self.pos < len(self.buf):
             self.buf.resize(unsafe_uninit_length=self.pos)
+        return self.buf^
+
+    def finish_keep(deinit self) -> List[Byte]:
+        """Return the buffer without shrinking. `pos` is the live prefix."""
         return self.buf^

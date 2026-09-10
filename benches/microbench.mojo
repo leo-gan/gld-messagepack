@@ -74,20 +74,21 @@ def _fill_event() -> Event:
 
 def _bench[T: MsgpackDatum](name: String, value: T, iters: Int) raises:
     var dest = List[Byte]()
+    var n = 0
     var i = 0
     while i < 80:
-        _ = encode_into(value, dest)
+        n = encode_into(value, dest)
         i += 1
     var t0 = perf_counter_ns()
     i = 0
     while i < iters:
-        _ = encode_into(value, dest)
+        n = encode_into(value, dest)
         i += 1
     var ser = Int(perf_counter_ns() - t0) // iters
     t0 = perf_counter_ns()
     i = 0
     while i < iters:
-        _ = decode[T](dest)
+        _ = decode[T](dest[0:n])
         i += 1
     var des = Int(perf_counter_ns() - t0) // iters
     if ser < 1:
@@ -105,7 +106,7 @@ def _bench[T: MsgpackDatum](name: String, value: T, iters: Int) raises:
         " ops_des=",
         1_000_000_000 // des,
         " size=",
-        len(dest),
+        n,
     )
 
 

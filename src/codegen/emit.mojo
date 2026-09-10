@@ -113,6 +113,15 @@ def _is_optional(doc: SchemaDoc, tid: Int) -> Bool:
     return doc.types[tid].kind == ST_OPTIONAL
 
 
+def _is_bool_type(doc: SchemaDoc, tid: Int) -> Bool:
+    var t = doc.types[tid].copy()
+    while t.kind == ST_REF or t.kind == ST_OPTIONAL or t.kind == ST_ENUM or t.kind == ST_CONST:
+        if t.inner < 0:
+            break
+        t = doc.types[t.inner].copy()
+    return t.kind == ST_BOOL
+
+
 def _key_word(name: String) -> UInt64:
     var b = name.as_bytes()
     var n = len(b)
@@ -345,43 +354,197 @@ def _emit_encode(doc: SchemaDoc, ty: SchemaType, scc: List[Int], self_id: Int) -
     var out = String()
     out += "\n    def encode_to(self, mut w: WireWriter, options: EncodeOptions):\n"
     out += "        _ = options\n"
+    out += "        w.ensure(512)\n"
+    out += "        var p = w.pos\n"
     if ty.encoding == ENC_ARRAY:
-        out += "        w.write_array_header(" + String(len(ty.props)) + ")\n"
+        out += "        w.buf[p] = Byte(" + String(0x90 + len(ty.props)) + ")\n"
+        out += "        p += 1\n"
     else:
-        out += "        w.write_map_header(" + _present_count_expr(ty) + ")\n"
+        out += "        w.buf[p] = Byte(" + String(0x80) + " + " + _present_count_expr(ty) + ")\n"
+        out += "        p += 1\n"
     var i = 0
     while i < len(ty.props):
-        var p = ty.props[i].copy()
-        var fname = mojo_ident(p.name)
-        var opt = _is_optional(doc, p.type_id)
+        var pr = ty.props[i].copy()
+        var fname = mojo_ident(pr.name)
+        var opt = _is_optional(doc, pr.type_id)
         var indent = "        "
         if opt and ty.encoding != ENC_ARRAY:
             out += "        if self." + fname + ":\n"
             indent = "            "
-        if ty.encoding == ENC_MAP:
-            if p.name.byte_length() <= 7:
-                out += (
-                    indent
-                    + "w.write_lit(UInt64("
-                    + String(_key_word(p.name))
-                    + "), "
-                    + String(p.name.byte_length() + 1)
-                    + ")\n"
-                )
-            elif p.name.byte_length() <= 31:
-                out += indent + "w.write_fixstr(\"" + p.name + "\".as_bytes())\n"
+        var fused = False
+        if (
+            ty.encoding == ENC_MAP
+            and (not opt)
+            and pr.name.byte_length() <= 7
+            and _is_bool_type(doc, pr.type_id)
+        ):
+            var shift = 8 * (pr.name.byte_length() + 1)
+            var total = pr.name.byte_length() + 2
+            out += _emit_store_lit(
+                indent,
+                String(_key_word(pr.name))
+                + " | ((UInt64(194) + UInt64(Int(self."
+                + fname
+                + "))) << UInt64("
+                + String(shift)
+                + "))",
+                total,
+            )
+            fused = True
+        elif ty.encoding == ENC_MAP:
+            if pr.name.byte_length() <= 7:
+                out += _emit_store_lit(indent, String(_key_word(pr.name)), pr.name.byte_length() + 1)
+            elif pr.name.byte_length() <= 15:
+                out += _emit_store_key_long(indent, pr.name)
             else:
-                out += indent + "w.write_str(\"" + p.name + "\")\n"
+                out += indent + "w.pos = p\n"
+                out += indent + "w.write_str(\"" + pr.name + "\")\n"
+                out += indent + "p = w.pos\n"
         elif ty.encoding == ENC_INTKEYS:
-            out += indent + "w.write_int(Int64(" + String(p.int_key) + "))\n"
+            out += _emit_raw_int(indent, "Int64(" + String(pr.int_key) + ")", "k" + fname)
+        if fused:
+            i += 1
+            continue
         if opt and ty.encoding == ENC_ARRAY:
             out += "        if self." + fname + ":\n"
-            out += "            " + _enc_stmt(doc, p.type_id, "self." + fname, scc, self_id) + "\n"
+            out += _enc_raw(doc, pr.type_id, "self." + fname, scc, self_id, "            ", fname)
             out += "        else:\n"
-            out += "            w.write_nil()\n"
+            out += "            w.buf[p] = Byte(192)\n"
+            out += "            p += 1\n"
         else:
-            out += indent + _enc_stmt(doc, p.type_id, "self." + fname, scc, self_id) + "\n"
+            out += _enc_raw(doc, pr.type_id, "self." + fname, scc, self_id, indent, fname)
         i += 1
+    out += "        w.pos = p\n"
+    return out
+
+
+def _emit_store_key_long(indent: String, name: String) -> String:
+    """Header plus name as two little-endian words when the key is 8…15 bytes."""
+    var b = name.as_bytes()
+    var n = len(b)
+    var w0 = UInt64(0xA0 | n)
+    var i = 0
+    while i < 7 and i < n:
+        w0 = w0 | (UInt64(Int(b[i])) << UInt64(8 * (i + 1)))
+        i += 1
+    var out = _emit_store_lit(indent, String(w0), 8)
+    if n > 7:
+        var w1 = UInt64(0)
+        var j = 7
+        while j < n:
+            w1 = w1 | (UInt64(Int(b[j])) << UInt64(8 * (j - 7)))
+            j += 1
+        out += _emit_store_lit(indent, String(w1), n - 7)
+    return out
+
+
+def _emit_store_lit(indent: String, word_expr: String, n: Int) -> String:
+    var out = indent + "w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(" + word_expr + ")\n"
+    out += indent + "p += " + String(n) + "\n"
+    return out
+
+
+def _emit_raw_f64(indent: String, acc: String, tag: String) -> String:
+    var out = indent + "var _fb_" + tag + " = UInt64(" + acc + ".to_bits())\n"
+    out += indent + "w.buf[p] = Byte(203)\n"
+    out += indent + "w.buf.unsafe_ptr().unsafe_offset(p + 1).unsafe_bitcast[UInt64]()[] = ("
+    out += "((_fb_" + tag + " & UInt64(0x00000000000000FF)) << UInt64(56)) | "
+    out += "((_fb_" + tag + " & UInt64(0x000000000000FF00)) << UInt64(40)) | "
+    out += "((_fb_" + tag + " & UInt64(0x0000000000FF0000)) << UInt64(24)) | "
+    out += "((_fb_" + tag + " & UInt64(0x00000000FF000000)) << UInt64(8)) | "
+    out += "((_fb_" + tag + " & UInt64(0x000000FF00000000)) >> UInt64(8)) | "
+    out += "((_fb_" + tag + " & UInt64(0x0000FF0000000000)) >> UInt64(24)) | "
+    out += "((_fb_" + tag + " & UInt64(0x00FF000000000000)) >> UInt64(40)) | "
+    out += "((_fb_" + tag + " & UInt64(0xFF00000000000000)) >> UInt64(56)))\n"
+    out += indent + "p += 9\n"
+    return out
+
+
+def _emit_raw_int(indent: String, acc: String, tag: String = "x") -> String:
+    var out = indent + "var _iv_" + tag + " = " + acc + "\n"
+    out += indent + "if _iv_" + tag + " >= Int64(-32) and _iv_" + tag + " <= Int64(127):\n"
+    out += indent + "    w.buf[p] = Byte(Int(_iv_" + tag + ") & 255)\n"
+    out += indent + "    p += 1\n"
+    out += indent + "else:\n"
+    out += indent + "    w.pos = p\n"
+    out += indent + "    w.write_int(_iv_" + tag + ")\n"
+    out += indent + "    p = w.pos\n"
+    return out
+
+
+def _enc_raw(
+    doc: SchemaDoc,
+    tid: Int,
+    acc: String,
+    scc: List[Int],
+    self_id: Int,
+    indent: String,
+    tag: String,
+) -> String:
+    var t = doc.types[tid].copy()
+    if t.kind == ST_OPTIONAL:
+        return _enc_raw(doc, t.inner, acc + ".value()", scc, self_id, indent, tag)
+    if t.kind == ST_REF or t.kind == ST_ENUM or t.kind == ST_CONST:
+        return _enc_raw(doc, t.inner, acc, scc, self_id, indent, tag)
+    if t.kind == ST_BOOL:
+        return (
+            indent
+            + "if "
+            + acc
+            + ":\n"
+            + indent
+            + "    w.buf[p] = Byte(195)\n"
+            + indent
+            + "else:\n"
+            + indent
+            + "    w.buf[p] = Byte(194)\n"
+            + indent
+            + "p += 1\n"
+        )
+    if t.kind == ST_INT:
+        return _emit_raw_int(indent, acc, tag)
+    if t.kind == ST_NUMBER:
+        return _emit_raw_f64(indent, acc, tag)
+    if t.kind == ST_STRING:
+        var out = indent + "var _sb_" + tag + " = " + acc + ".as_bytes()\n"
+        out += indent + "var _sn_" + tag + " = len(_sb_" + tag + ")\n"
+        out += indent + "w.buf[p] = Byte(160 + _sn_" + tag + ")\n"
+        out += indent + "p += 1\n"
+        out += indent + "if _sn_" + tag + " > 0:\n"
+        out += indent + "    w.pos = p\n"
+        out += indent + "    w.write_bytes(_sb_" + tag + ")\n"
+        out += indent + "    p = w.pos\n"
+        return out
+    if t.kind == ST_ARRAY:
+        var inner = doc.types[t.inner].copy()
+        while inner.kind == ST_REF or inner.kind == ST_OPTIONAL:
+            if inner.inner < 0:
+                break
+            inner = doc.types[inner.inner].copy()
+        if inner.kind == ST_NUMBER:
+            var out = indent + "var _an_" + tag + " = len(" + acc + ")\n"
+            out += indent + "if _an_" + tag + " <= 15:\n"
+            out += indent + "    w.buf[p] = Byte(144 + _an_" + tag + ")\n"
+            out += indent + "    p += 1\n"
+            out += indent + "else:\n"
+            out += indent + "    w.pos = p\n"
+            out += indent + "    w.write_array_header(_an_" + tag + ")\n"
+            out += indent + "    p = w.pos\n"
+            out += indent + "var _ai_" + tag + " = 0\n"
+            out += indent + "while _ai_" + tag + " < _an_" + tag + ":\n"
+            out += _emit_raw_f64(indent + "    ", acc + "[_ai_" + tag + "]", "a" + tag)
+            out += indent + "    _ai_" + tag + " += 1\n"
+            return out
+        var out = indent + "w.pos = p\n"
+        out += indent + _enc_list(doc, t.inner, acc, scc, self_id) + "\n"
+        out += indent + "p = w.pos\n"
+        return out
+    var call = acc
+    if _starts(_type_name(doc, tid, scc, self_id), "Box["):
+        call = acc + "[]"
+    var out = indent + "w.pos = p\n"
+    out += indent + call + ".encode_to(w, options)\n"
+    out += indent + "p = w.pos\n"
     return out
 
 

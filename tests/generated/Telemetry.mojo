@@ -33,13 +33,28 @@ struct Telemetry(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1)
-        w.write_lit(UInt64(32481177325631142), 7)
-        w.write_array_header(len(self.values))
-        var i = 0
-        while i < len(self.values):
-            w.write_f64(self.values[i])
-            i += 1
+        w.ensure(512)
+        var p = w.pos
+        w.buf[p] = Byte(128 + 0 + 1)
+        p += 1
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(32481177325631142)
+        p += 7
+        var _an_values = len(self.values)
+        if _an_values <= 15:
+            w.buf[p] = Byte(144 + _an_values)
+            p += 1
+        else:
+            w.pos = p
+            w.write_array_header(_an_values)
+            p = w.pos
+        var _ai_values = 0
+        while _ai_values < _an_values:
+            var _fb_avalues = UInt64(self.values[_ai_values].to_bits())
+            w.buf[p] = Byte(203)
+            w.buf.unsafe_ptr().unsafe_offset(p + 1).unsafe_bitcast[UInt64]()[] = (((_fb_avalues & UInt64(0x00000000000000FF)) << UInt64(56)) | ((_fb_avalues & UInt64(0x000000000000FF00)) << UInt64(40)) | ((_fb_avalues & UInt64(0x0000000000FF0000)) << UInt64(24)) | ((_fb_avalues & UInt64(0x00000000FF000000)) << UInt64(8)) | ((_fb_avalues & UInt64(0x000000FF00000000)) >> UInt64(8)) | ((_fb_avalues & UInt64(0x0000FF0000000000)) >> UInt64(24)) | ((_fb_avalues & UInt64(0x00FF000000000000)) >> UInt64(40)) | ((_fb_avalues & UInt64(0xFF00000000000000)) >> UInt64(56)))
+            p += 9
+            _ai_values += 1
+        w.pos = p
 
     def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
         if not r.try_eat_fixstr("values".as_bytes()):

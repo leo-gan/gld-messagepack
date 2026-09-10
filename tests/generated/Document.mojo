@@ -47,19 +47,45 @@ struct Document(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1 + 1 + 1 + 1)
-        w.write_lit(UInt64(6580642), 3)
-        w.write_str(self.id)
-        w.write_lit(UInt64(32498765033403302), 7)
-        w.write_int(self.status)
-        w.write_lit(UInt64(418564631972), 5)
+        w.ensure(512)
+        var p = w.pos
+        w.buf[p] = Byte(128 + 0 + 1 + 1 + 1 + 1)
+        p += 1
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(6580642)
+        p += 3
+        var _sb_id = self.id.as_bytes()
+        var _sn_id = len(_sb_id)
+        w.buf[p] = Byte(160 + _sn_id)
+        p += 1
+        if _sn_id > 0:
+            w.pos = p
+            w.write_bytes(_sb_id)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(32498765033403302)
+        p += 7
+        var _iv_status = self.status
+        if _iv_status >= Int64(-32) and _iv_status <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_status) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_status)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(418564631972)
+        p += 5
+        w.pos = p
         self.meta.encode_to(w, options)
-        w.write_lit(UInt64(126913690757541), 6)
+        p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(126913690757541)
+        p += 6
+        w.pos = p
         w.write_array_header(len(self.items))
         var i = 0
         while i < len(self.items):
             self.items[i].encode_to(w, options)
             i += 1
+        p = w.pos
+        w.pos = p
 
     def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
         if not r.try_eat_fixstr("id".as_bytes()):

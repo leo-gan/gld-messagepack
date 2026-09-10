@@ -41,13 +41,43 @@ struct DocumentItem(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1 + 1 + 1)
-        w.write_lit(UInt64(1969976227), 4)
-        w.write_str(self.sku)
-        w.write_lit(UInt64(2037674403), 4)
-        w.write_int(self.qty)
-        w.write_fixstr("price_minor".as_bytes())
-        w.write_int(self.price_minor)
+        w.ensure(512)
+        var p = w.pos
+        w.buf[p] = Byte(128 + 0 + 1 + 1 + 1)
+        p += 1
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(1969976227)
+        p += 4
+        var _sb_sku = self.sku.as_bytes()
+        var _sn_sku = len(_sb_sku)
+        w.buf[p] = Byte(160 + _sn_sku)
+        p += 1
+        if _sn_sku > 0:
+            w.pos = p
+            w.write_bytes(_sb_sku)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(2037674403)
+        p += 4
+        var _iv_qty = self.qty
+        if _iv_qty >= Int64(-32) and _iv_qty <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_qty) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_qty)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(7881129350566932651)
+        p += 8
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(1919905385)
+        p += 4
+        var _iv_price_minor = self.price_minor
+        if _iv_price_minor >= Int64(-32) and _iv_price_minor <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_price_minor) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_price_minor)
+            p = w.pos
+        w.pos = p
 
     def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
         if not r.try_eat_fixstr("sku".as_bytes()):

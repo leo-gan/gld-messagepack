@@ -38,15 +38,30 @@ struct Event(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1 + 1)
-        w.write_lit(UInt64(7566498), 3)
-        w.write_int(self.ts)
-        w.write_lit(UInt64(126935417250213), 6)
+        w.ensure(512)
+        var p = w.pos
+        w.buf[p] = Byte(128 + 0 + 1 + 1)
+        p += 1
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(7566498)
+        p += 3
+        var _iv_ts = self.ts
+        if _iv_ts >= Int64(-32) and _iv_ts <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_ts) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_ts)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(126935417250213)
+        p += 6
+        w.pos = p
         w.write_array_header(len(self.attrs))
         var i = 0
         while i < len(self.attrs):
             self.attrs[i].encode_to(w, options)
             i += 1
+        p = w.pos
+        w.pos = p
 
     def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
         if not r.try_eat_fixstr("ts".as_bytes()):

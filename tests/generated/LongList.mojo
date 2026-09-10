@@ -38,12 +38,32 @@ struct LongList(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1 + (1 if self.next else 0))
-        w.write_lit(UInt64(111555003905701), 6)
-        w.write_int(self.value)
+        w.ensure(512)
+        var p = w.pos
+        w.buf[p] = Byte(128 + 0 + 1 + (1 if self.next else 0))
+        p += 1
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(111555003905701)
+        p += 6
+        var _iv_value = self.value
+        if _iv_value >= Int64(-32) and _iv_value <= Int64(127):
+            w.buf[p] = Byte(Int(_iv_value) & 255)
+            p += 1
+        else:
+            w.pos = p
+            w.write_int(_iv_value)
+            p = w.pos
         if self.next:
-            w.write_lit(UInt64(500236119716), 5)
-            w.write_int(self.next.value())
+            w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(500236119716)
+            p += 5
+            var _iv_next = self.next.value()
+            if _iv_next >= Int64(-32) and _iv_next <= Int64(127):
+                w.buf[p] = Byte(Int(_iv_next) & 255)
+                p += 1
+            else:
+                w.pos = p
+                w.write_int(_iv_next)
+                p = w.pos
+        w.pos = p
 
     def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
         if not r.try_eat_fixstr("value".as_bytes()):

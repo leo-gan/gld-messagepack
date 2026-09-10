@@ -37,11 +37,31 @@ struct EventAttr(Copyable, Movable, Defaultable, Deinitable, MsgpackDatum):
 
     def encode_to(self, mut w: WireWriter, options: EncodeOptions):
         _ = options
-        w.write_map_header(0 + 1 + 1)
-        w.write_lit(UInt64(2036689827), 4)
-        w.write_str(self.key)
-        w.write_lit(UInt64(111555003905701), 6)
-        w.write_str(self.value)
+        w.ensure(512)
+        var p = w.pos
+        w.buf[p] = Byte(128 + 0 + 1 + 1)
+        p += 1
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(2036689827)
+        p += 4
+        var _sb_key = self.key.as_bytes()
+        var _sn_key = len(_sb_key)
+        w.buf[p] = Byte(160 + _sn_key)
+        p += 1
+        if _sn_key > 0:
+            w.pos = p
+            w.write_bytes(_sb_key)
+            p = w.pos
+        w.buf.unsafe_ptr().unsafe_offset(p).unsafe_bitcast[UInt64]()[] = UInt64(111555003905701)
+        p += 6
+        var _sb_value = self.value.as_bytes()
+        var _sn_value = len(_sb_value)
+        w.buf[p] = Byte(160 + _sn_value)
+        p += 1
+        if _sn_value > 0:
+            w.pos = p
+            w.write_bytes(_sb_value)
+            p = w.pos
+        w.pos = p
 
     def _decode_expected[origin: ImmOrigin](mut self, mut r: WireReader[origin]) raises DecodeError -> Bool:
         if not r.try_eat_fixstr("key".as_bytes()):

@@ -19,10 +19,13 @@ host. They are useful for a compile-test loop. They are not an official
 cross-language ranking. There is no Mojo MessagePack row in
 serializer-benchmark yet.
 
-On the generated `Message` record, a 2026-09-10 pass moved encode from about
-**84 ns to 65 ns** and decode from about **613 ns to 169 ns**. Decode is
-more than twice as fast. Encode is about 29% faster. The remaining encode
-gap is many small stores, not one large algorithm.
+On the generated `Message` record, a 2026-09-10 decode pass moved decode
+from about **613 ns to about 169 ns**. A following one-hour encode pass
+moved encode from about **61 ns to about 14 ns** on the same local
+microbench (three later runs sat at 14–15 ns). That encode change is a
+direct buffer cursor: the generated `encode_to` writes headers, keys, and
+small values into `w.buf` itself instead of calling `write_int` /
+`write_fixstr` once per field.
 
 ## Two paths
 
@@ -141,6 +144,32 @@ JSON-compatible and it is positional: a new field in the middle shifts
 every later index. Integer keys need both sides to share the numbers. That
 is why the default stays string keys.
 
+### Unrolled `encode_to` (no per-field helpers)
+
+**Problem.** After keys were baked, encode of `Message` was still about
+60 ns. Timing `encode_into` against a reused `encode_to` on the same
+writer gave the same number. The wrapper was not the cost. Each field
+still called `write_lit`, `write_int`, or `write_fixstr`. Those helpers
+check length, update `w.pos`, and return. Eight fields meant many small
+calls to write 93 bytes.
+
+**What we do.** The generator emits one `encode_to` that keeps a local
+cursor `p`. After `w.ensure(512)` it stores the map header as one byte,
+stores short keys as little-endian `UInt64` words, stores fixints as one
+byte, and stores a float 64 as `0xcb` plus an 8-byte byteswap. A bool
+that follows a 7-byte key is fused into that same 8-byte word (`0xc2` or
+`0xc3` in the last byte). Nested lists of floats (telemetry) use the same
+float store in a loop. Go `msgp` generated encoders do this: one
+function, no per-field helper.
+
+**Trade-off.** The generated file is longer and harder to read. A bug in
+the cursor (`p` not written back to `w.pos` before a helper) would
+overwrite bytes. Helpers still run for wide integers, long keys, and
+nested structs. `encode_into` keeps `dest` at least 512 bytes so those
+`UInt64` stores do not run past the list. Callers must use the returned
+count as the live prefix; `decode` of the whole list would see leftover
+bytes from an earlier larger value.
+
 ### Unrolled multi-byte stores
 
 Floats are eight IEEE 754 bytes after `0xcb`. A loop of eight shifts is
@@ -243,7 +272,11 @@ Each row was implemented, compiled, and timed on
 | `encode_into` reuse | vmihailenco `Reset` | Kept. Timed encode path. |
 | Baked `write_fixstr` / `write_lit` | Go `msgp`, mpack known keys | Kept. Small encode win. |
 | Expected-order `try_eat_fixstr` | glaze, mojo-json | Kept. Largest decode win (613 ns → ~169 ns on `Message`). |
-| Unrolled 2/4/8-byte I/O | msgpack-c / mpack stores | Kept. Helps telemetry floats. |
+| Unrolled 2/4/8-byte I/O | msgpack-c / mpack stores | Kept. |
+| Generated cursor `encode_to` | Go `msgp` | Kept. `Message` encode 61 ns → 14 ns. |
+| Byteswap `UInt64` float store | one store instead of eight | Kept. Telemetry encode ~320 ns → ~40 ns. |
+| Fuse 7-byte key + bool | MessagePack-CSharp packed fields | Kept. One `UInt64` store. |
+| `encode_into` keep 512-byte dest | mpack / vmihailenco reuse | Kept. Needed so word stores do not grow. |
 | `write_lit` `ensure(8)` always | guessed for u64 store | Grew an exact-size dest every encode. Now ensures `n` and falls back to bytes if 8 would run past the end. |
 | Runtime u64 rebuild of a key on every `try_eat_fixstr` | mojo-json word compare | Slower than a 6–10 byte loop. Reverted. The compare is scalar. |
 | Always encode structs as arrays | MessagePack-CSharp IntKey, shamaton | Faster and smaller. Not the default. Schema can request it. |
@@ -256,10 +289,10 @@ Each row was implemented, compiled, and timed on
 `strings` decode is about 2 µs for 32 heap `String`s. The key walk is not
 the bound. EmberJson’s JSON path has the same allocation shape.
 
-`encode` of `Message` is about 65 ns. That is many small stores (map
-header, eight keys, eight values). There is no remaining 2× method that
-keeps string-key maps and shortest prefixes. Array encoding would be the
-next large cut, at the cost of wire compatibility.
+`encode` of `Message` is about 14 ns on the local microbench. `strings`
+encode is about 67 ns because each of the 32 values is still a
+`String.as_bytes()` plus a copy. Array encoding of structs would shrink
+the key bytes further and would change the default wire.
 
 A tape (classify the whole buffer, then copy) would help `strings` and
 hurt `message`, where the schema is already known.
