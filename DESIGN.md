@@ -8,7 +8,7 @@
 | **Status** | Draft (rev 3) |
 | **Target repo** | `/home/leo/PycharmProjects/GLD/gld-messagepack` (greenfield standalone library; only a local `.env` as of 2026-09-10) |
 | **License** | MIT, Copyright (c) 2026 Leonid Ganeline |
-| **Recommended Mojo pin** | `mojo == 1.0.0` (stable, 2026-08-11) |
+| **Recommended Mojo pin** | `mojo == 1.1.0` (stable, 2026-09-17) |
 | **Spec targets** | [MessagePack specification](https://github.com/msgpack/msgpack/blob/master/spec.md) (2013 types: nil, bool, int/uint, f32/f64, str, bin, array, map, ext/fixext), [timestamp extension type `-1`](https://github.com/msgpack/msgpack/blob/master/spec.md#timestamp-extension-type) (4 / 8 / 12 byte payloads) |
 | **Docs** | <https://leo-gan.github.io/gld-messagepack/> |
 | **Publish channel** | <https://prefix.dev/leo-gan/leo-gan> |
