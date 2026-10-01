@@ -5,7 +5,7 @@ If you have not used MessagePack as a wire format before, start with
 versus `bin`, maps, extensions, timestamps, and streams.
 [Techniques](techniques.md) explains how encode and decode are implemented.
 
-## Install Mojo 1.0.0
+## Install Mojo 1.1.0
 
 ```bash
 git clone https://github.com/leo-gan/gld-messagepack.git

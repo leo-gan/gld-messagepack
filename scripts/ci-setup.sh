@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install pixi + Mojo 1.0.0 for this repo.
+# Install pixi + Mojo 1.1.0 for this repo.
 # The Modular conda channel (https://conda.modular.com/max) may require a
 # logged-in Modular / prefix.dev account. If `pixi install` fails with 401/403,
 # export PREFIX_API_KEY (or the current Modular token) and retry.
@@ -30,7 +30,7 @@ fi
 
 echo "pixi: $(pixi --version)"
 echo "channels: https://conda.modular.com/max , conda-forge"
-echo "pin: mojo == 1.0.0"
+echo "pin: mojo == 1.1.0"
 
 if ! pixi install; then
   echo "pixi install failed." >&2
