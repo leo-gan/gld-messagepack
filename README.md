@@ -1,5 +1,7 @@
 # mojo-messagepack
 
+[Serialization](https://leo-gan.github.io/serialization/) is the hub for the theory, the history, and the benchmarks.
+
 A from-scratch [MessagePack](https://msgpack.org/) implementation for
 [Mojo](https://mojolang.org/). The runtime and the code generator are written
 in Mojo. They do not wrap, link, or vendor msgpack-c or any other C, C++, or
